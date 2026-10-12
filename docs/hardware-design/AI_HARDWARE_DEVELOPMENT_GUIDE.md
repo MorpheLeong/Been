@@ -35,7 +35,7 @@ The target is the ESP32-C3 FoloToy AI Passport with ESP-IDF 5.5.3. It has 8 MB F
 | Audio | ES8311 playback and microphone | shared I2C + I2S0 full duplex | Playback and recording page |
 | Battery | CW2017 fuel gauge | shared I2C0, address `0x63` | Optional SOC and voltage driver |
 | Wi-Fi | 2.4 GHz station | initialized by the demo | Scan page |
-| Bluetooth LE | NimBLE peripheral | initialized by the demo | Non-connectable advertising page |
+| Bluetooth LE | NimBLE peripheral | initialized by the product app | Connectable GATT service for track capture, itinerary check-in, and QR snapshot sync |
 | Low power | light/deep sleep | RTC timer wake | 2 s light and 5 s deep-sleep modes |
 | Console | USB Serial/JTAG | native USB GPIO18/19 | Configured |
 
@@ -73,8 +73,8 @@ LCD reset and amplifier enable are `-1`: display reset uses software reset, and 
 | I2S0 | audio BSP | TX and RX are full duplex and share MCLK/BCLK/WS. |
 | USB Serial/JTAG | console configuration | GPIO18/19 are part of the selected console path. |
 | Internal RAM/DMA | display, LVGL, audio, radio, tasks | No PSRAM exists; total free heap and largest contiguous block both matter. |
-| NVS/network event loop | `demo_radio.c` | Prepared once for Wi-Fi/BLE demos; do not erase unrelated NVS data on initialization errors. |
-| Wi-Fi/BLE stacks | individual demo pages | Current demos start on page entry and deinitialize on exit; the stacks do not remain active together. |
+| NVS | `passport_store.c` and `demo_radio.c` | Product location records use a versioned, CRC-checked blob; preserve NVS on errors. |
+| Wi-Fi/BLE stacks | Wi-Fi demo and product location link | BLE GATT stays active for the product app lifetime; do not start the Wi-Fi demo stack at the same time. |
 
 GPIO0 is both the button ADC node and an ESP32-C3 boot-related pin. GPIO21 is the backlight output and conflicts with the commonly used UART0 TX mapping. Pin reassignment requires boot/programming-path review and on-device acceptance.
 
@@ -89,19 +89,18 @@ GPIO0 is both the button ADC node and an ESP32-C3 boot-related pin. GPIO21 is th
 
 ```text
 app_main
-  ├─ shared I2C init and scan
-  ├─ display and LVGL init, then backlight
-  ├─ input queue/lifecycle task, then button init
-  ├─ audio init
-  ├─ battery init
-  └─ LVGL menu and independent demo pages
+  ├─ I2C, display, LVGL, and backlight
+  ├─ battery and NVS record restore
+  ├─ input queue and three-button driver
+  ├─ NimBLE GATT companion service (track, checklist, QR)
+  └─ AI Passport home, track history, checklist, and QR screens
 ```
 
-Display/LVGL is a hard dependency. Buttons, audio, and battery are soft dependencies whose pages show `[FAIL]` while other pages remain available. Public BSP APIs are under `components/bsp/include/`. Successful display, button, audio, and LVGL initialization is idempotent. Display, button, and audio partial failures release resources acquired by the BSP. Failed LVGL display/callback registration removes the display but retains the initialized port for retry; port initialization itself failing requires a reboot because its asynchronous cleanup has no public completion handshake. Other incomplete lower-level rollbacks are reported and prevent live handles from being overwritten. Serialize BSP initialization from one owner; there is no universal BSP deinitialization API.
+The product application replaces the demo menu at startup. It initializes the connectable NimBLE GATT service for the app lifetime so the phone can stay connected, subscribe, and receive track/check-in requests. The Android companion owns itinerary ordering, the 3-star limit, and the maximum-10 QR selection; Passport stores only the latest validated snapshot and handles display/navigation. Coordinates and QR payloads stay on the phone except that selected QR payloads are sent to Passport for display. See `docs/protocols/passport-companion-ble.md` for the shared v3 frames and `docs/protocols/location-capture-ble.md` for the legacy track protocol history. BLE pairing/encryption and on-device acceptance are still pending. Public BSP APIs are under `components/bsp/include/`. Successful display, button, audio, and LVGL initialization is idempotent. Display, button, and audio partial failures release resources acquired by the BSP. Failed LVGL display/callback registration removes the display but retains the initialized port for retry; port initialization itself failing requires a reboot because its asynchronous cleanup has no public completion handshake. Other incomplete lower-level rollbacks are reported and prevent live handles from being overwritten. Serialize BSP initialization from one owner; there is no universal BSP deinitialization API.
 
 Button callbacks run in the shared `esp_timer` task. They only enqueue input and return; the demo lifecycle task handles navigation and starts or stops slow services without holding the LVGL lock. Page exit first completes a bounded producer stop, then deletes timers and UI objects while holding the lock. Audio and light-sleep workers use cooperative cancellation and an explicit exit handshake rather than forced task deletion. The low-power worker force-suspends and verifies ES8311 before either sleep mode and resumes it after light sleep. For deep sleep it suspends and verifies CW2017 first, force-suspends ES8311, stops and releases I2S, releases the shared I2C pins, blocks further LVGL flushes, sleeps the LCD, and holds its safe pin levels before entering deep sleep. Individual peripheral failures are logged but do not strand the system awake; an unexpected return after terminal pin release causes a restart. Deep-sleep wake also restarts the application and follows normal BSP initialization.
 
-Wi-Fi, NimBLE, and sleep use ESP-IDF directly rather than the BSP. `demo_radio.c` owns shared NVS, `esp_netif`, and default-event-loop setup. Wi-Fi and Bluetooth pages allocate their radio stacks after page creation and stop/deinitialize them before page deletion. Do not erase NVS to hide partition errors. Deep sleep restarts the application and the demo uses RTC slow memory for the wake counter.
+Wi-Fi, NimBLE, and sleep use ESP-IDF directly rather than the BSP. The product app owns the NimBLE companion service in `main/passport_ble_link.c`; the standalone demo files remain examples but are not part of the product image. Do not initialize the Wi-Fi demo alongside the persistent BLE service on this no-PSRAM target. Do not erase NVS to hide partition errors. Deep sleep restarts the application and the low-power demo uses RTC slow memory for the wake counter.
 
 Audio, low-power, and BLE workers acknowledge completion only after their final
 shared-state access, then park until the lifecycle owner deletes them. A timed-out

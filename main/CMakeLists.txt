@@ -1,16 +1,18 @@
 idf_component_register(
     SRCS "main.c"
-         "demo_navigation.c"
-         "ui_pixel.c"
-         "ui_pixel_math.c"
-         "demo_display.c"
-         "demo_button.c"
-         "demo_audio.c"
-         "demo_battery.c"
-         "demo_radio.c"
-         "demo_wifi.c"
-         "demo_ble.c"
-         "demo_low_power.c"
+         "passport_app_model.c"
+         "passport_ble_link.c"
+         "passport_location_model.c"
+         "passport_location_protocol.c"
+         "passport_store.c"
+         "passport_trip_model.c"
+         "passport_trip_store.c"
+         "passport_display_policy.c"
     INCLUDE_DIRS "."
-    REQUIRES bsp bt esp_event esp_hw_support esp_netif esp_timer esp_wifi nvs_flash
+    REQUIRES bsp bt esp_hw_support esp_timer nvs_flash qrcode
+)
+
+target_sources(${COMPONENT_LIB} PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/passport_gb2312_14.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/passport_gb2312_20.c"
 )

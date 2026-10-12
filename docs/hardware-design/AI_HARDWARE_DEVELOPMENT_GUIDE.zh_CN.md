@@ -37,7 +37,7 @@ AI 应先完成以下检查：
 | 音频 | ES8311，播放 + 麦克风录音 | I2C 控制 + I2S0 全双工 | 播放与录音页 |
 | 电池 | CW2017 电量计 | 共享 I2C0，地址 0x63 | 可缺省 SOC/电压驱动 |
 | Wi-Fi | ESP32-C3 2.4 GHz STA | 应用页按需初始化 | 扫描页 |
-| Bluetooth LE | ESP32-C3 NimBLE peripheral | 应用页按需初始化 | 不可连接广播页 |
+| Bluetooth LE | ESP32-C3 NimBLE peripheral | 产品应用启动时初始化 | 面向手机 App 的轨迹记录、打卡清单与二维码快照同步 GATT 服务 |
 | 低功耗 | ESP32-C3 light/deep sleep | RTC timer 唤醒 | 2 秒 light sleep 和 5 秒 deep sleep 模式 |
 | 日志 | USB Serial/JTAG | 原生 USB GPIO18/19 | 已配置 |
 
@@ -77,8 +77,8 @@ LCD RST 和功放 PA 使能均定义为 `-1`：LCD 复位使用软件路径，�
 | I2S0 | 音频 BSP | TX/RX 全双工，共用 MCLK/BCLK/WS。 |
 | USB Serial/JTAG | 控制台配置 | GPIO18/19 属于当前控制台路径。 |
 | 内部 RAM/DMA | 显示、LVGL、音频、无线、任务 | 无 PSRAM；总空闲堆和最大连续块都必须检查。 |
-| NVS/网络 event loop | `demo_radio.c` | 为 Wi-Fi/BLE demo 一次性准备；初始化失败时不得擦除无关 NVS 数据。 |
-| Wi-Fi/BLE 协议栈 | 各自 demo 页面 | 当前页面进入时启动、退出时释放，不同时常驻。 |
+| NVS | `passport_store.c` 与 `demo_radio.c` | 产品位置记录使用带版本和 CRC 校验的 blob；错误时保留 NVS。 |
+| Wi-Fi/BLE 协议栈 | Wi-Fi demo 与产品定位链路 | 产品应用生命周期内保持 BLE GATT；不可同时启动 Wi-Fi demo 协议栈。 |
 
 GPIO0 同时是按键 ADC 节点和 ESP32-C3 启动相关管脚；GPIO21 是背光输出，并与常见 UART0 TX 映射冲突。重分配引脚必须复核启动/烧录路径并完成实机验收。
 
@@ -93,22 +93,14 @@ GPIO0 同时是按键 ADC 节点和 ESP32-C3 启动相关管脚；GPIO21 是背�
 
 ```text
 app_main
-  ├─ bsp_i2c_init → bsp_i2c_scan
-  ├─ bsp_display_init → bsp_lvgl_init → backlight 100%
-  ├─ input queue/lifecycle task → bsp_button_init(on_key)
-  ├─ bsp_audio_init
-  ├─ bsp_battery_init
-  └─ LVGL menu
-       ├─ Display demo
-       ├─ Button demo
-       ├─ Audio demo
-       ├─ Battery demo
-       ├─ Wi-Fi scan demo
-       ├─ Bluetooth LE advertising demo
-       └─ Low Power sleep-mode demo
+  ├─ I2C、显示、LVGL 与背光
+  ├─ 电池与 NVS 记录恢复
+  ├─ 输入队列与三键驱动
+  ├─ NimBLE GATT 配套服务（轨迹、清单、二维码）
+  └─ AI Passport 主界面、轨迹历史、打卡清单与二维码页
 ```
 
-显示是 UI 的硬依赖，显示或 LVGL 初始化失败时 `app_main` 直接返回。按键、音频、电池是软依赖：初始化失败的菜单项显示 `[FAIL]`，其他页面仍可用。
+产品应用启动后直接进入新设计的界面，不再显示 demo 菜单。NimBLE GATT 服务在产品应用生命周期内保持运行，供手机连接、订阅通知并接收轨迹记录/打卡请求。Android 配套端负责清单顺序、最多 3 个星标及最多 10 张二维码的选择；Passport 仅保存最新的校验快照并处理显示/导航。坐标与二维码原文默认保留在手机，选中的二维码原文会同步到 Passport 供显示。v3 帧格式见 `docs/protocols/passport-companion-ble.zh_CN.md`，`docs/protocols/location-capture-ble.zh_CN.md` 记录旧版轨迹协议历史。BLE 配对/加密和实机验收尚未完成。显示/LVGL 与按键是硬依赖；电池读数为可选功能。demo 源文件仍作为参考保留，但不会编入产品镜像。
 
 公开 BSP API 位于 `components/bsp/include/`：
 
@@ -123,7 +115,7 @@ app_main
 
 按键回调运行在共享 `esp_timer` 任务中，只负责将输入加入队列并立即返回。demo 生命周期任务负责页面导航，并在不持有 LVGL 锁时启动或停止慢服务。退出页面时先以有界等待停止 producer，再持锁删除定时器和 UI 对象。音频与 light-sleep 工作任务使用协作取消和明确的退出握手，不再强制删除仍可能访问外设或 UI 的任务。低功耗工作任务会在两种睡眠前强制暂停 ES8311 并回读校验，在 light sleep 返回后恢复。deep sleep 时则先暂停并校验 CW2017，再强制暂停 ES8311，停止和释放 I2S，释放共享 I2C 引脚，阻止后续 LVGL 刷屏，休眠 LCD 并保持安全引脚电平，最后进入 deep sleep。单个外设失败会记录日志，但不会让系统卡在唤醒状态；终端引脚释放后若意外返回则重启。deep sleep 唤醒同样会重启应用并走正常 BSP 初始化流程。
 
-Wi-Fi、NimBLE 和 light/deep sleep 直接使用 ESP-IDF API，不属于板级 BSP。`demo_radio.c` 只管理 NVS、`esp_netif` 和默认 event loop 这些应用级共享前置。Wi-Fi 和 BLE 页在页面创建后初始化高内存占用的无线栈，在删除页面前停止并释放；不自动抹除已有 NVS 数据来掩盖分区错误。deep sleep 会按 ESP32-C3 语义重启应用，示例用 RTC slow memory 记录唤醒次数。
+Wi-Fi、NimBLE 和 light/deep sleep 直接使用 ESP-IDF API，不属于板级 BSP。产品应用在 `main/passport_ble_link.c` 中管理 NimBLE 配套服务；独立 demo 文件仍保留作示例，但不会编入产品镜像。无 PSRAM 板卡上不要同时启动 Wi-Fi demo 与常驻 BLE 配套服务。不自动抹除已有 NVS 数据来掩盖分区错误。deep sleep 会按 ESP32-C3 语义重启应用，示例用 RTC slow memory 记录唤醒次数。
 
 音频、低功耗和 BLE 工作任务在最后一次共享状态访问之后才发送完成确认，随后挂起，由生命周期所有者删除。停止超时后保留任务句柄和完成信号量，供后续重试；不能让旧任务清空新任务的句柄。Wi-Fi 分别检查 netif 创建、驱动绑定和事件注册结果；BLE 检查 host 任务创建结果，没有创建任务时直接清理，不调用 host-stop。不能依赖内部断言退出或忽略任务创建结果的 SDK 辅助函数处理内存不足。
 

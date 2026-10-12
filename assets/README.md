@@ -17,6 +17,15 @@ Store reusable font files and generated font sources in `fonts/`.
 - Check Flash and internal-RAM impact before adding a font; the ESP32-C3 has no PSRAM.
 - Do not commit fonts whose license does not permit redistribution.
 
+| File | Use and source/license |
+| --- | --- |
+| [`fonts/passport_gb2312_14.c`](fonts/passport_gb2312_14.c), [`fonts/passport_gb2312_20.c`](fonts/passport_gb2312_20.c) | Simplified Chinese UI fonts at 14px and 20px, 4 bpp, for the application's locked LVGL 9.6.0~1. Generated from Noto Sans SC with `lv_font_conv` 1.5.3, without compression or kerning. Covers GB2312 Chinese, ASCII and common punctuation. Noto Sans CJK is licensed under OFL 1.1; see [`fonts/OFL.txt`](fonts/OFL.txt). |
+| [`fonts/passport_gb2312_symbols.txt`](fonts/passport_gb2312_symbols.txt) | The 6,763 Chinese characters encoded by GB2312, used as the reproducible converter symbol list. |
+
+Regenerate with [`tools/generate_passport_fonts.py`](../tools/generate_passport_fonts.py), which records the exact punctuation ranges and LVGL 9 static-bitmap adaptation. Pass `--font` with the Noto Sans SC source file and `--converter` with `lv_font_conv` 1.5.3's JavaScript entry point. This build used `C:\Windows\Fonts\Noto Sans SC (TrueType).otf`, SHA-256 `A2B93E6C2DB05D6BBBF6F27D413EC73269735B7B679019C8A5AA9670FF0FFBF2`.
+
+[`tools/check_passport_fonts.py`](../tools/check_passport_fonts.py) verifies the generated cmap tables, GB2312 coverage, fixed text and glyph bounds. The UI aligns the Latin/Chinese baselines and reserves the 17px/24px line heights. Characters outside this set can use the built-in Source Han SC fallback; arbitrary rare characters and emoji are not guaranteed.
+
 ## Images
 
 Store reusable source images and generated display assets in `images/`.

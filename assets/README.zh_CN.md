@@ -15,6 +15,15 @@
 - 添加字库前评估 Flash 与内部 RAM 影响；ESP32-C3 无 PSRAM。
 - 不提交许可不允许分发的字库。
 
+| 文件 | 用途与来源/许可 |
+| --- | --- |
+| [`fonts/passport_gb2312_14.c`](fonts/passport_gb2312_14.c)、[`fonts/passport_gb2312_20.c`](fonts/passport_gb2312_20.c) | 简体中文 UI 字体，14px/20px、4 bpp，适配应用锁定的 LVGL 9.6.0~1。由 Noto Sans SC 经 `lv_font_conv` 1.5.3 生成，不压缩、不含字距表。覆盖 GB2312 中文、ASCII 和常用标点。Noto Sans CJK 使用 OFL 1.1 许可，见 [`fonts/OFL.txt`](fonts/OFL.txt)。 |
+| [`fonts/passport_gb2312_symbols.txt`](fonts/passport_gb2312_symbols.txt) | GB2312 编码的 6,763 个汉字，作为可复现的字体转换字符清单。 |
+
+使用 [`tools/generate_passport_fonts.py`](../tools/generate_passport_fonts.py) 重新生成，它记录了精确标点范围和 LVGL 9 静态位图适配。`--font` 指向 Noto Sans SC 源字体，`--converter` 指向 `lv_font_conv` 1.5.3 的 JavaScript 入口。本次源文件为 `C:\Windows\Fonts\Noto Sans SC (TrueType).otf`，SHA-256 为 `A2B93E6C2DB05D6BBBF6F27D413EC73269735B7B679019C8A5AA9670FF0FFBF2`。
+
+[`tools/check_passport_fonts.py`](../tools/check_passport_fonts.py) 验证生成字库的 cmap 表、GB2312 覆盖、固定文案和字形边界。界面对齐中英文基线，并保留 17px/24px 行高。超出该范围的字符可以回退到内置思源黑体 SC 子集；不保证任意生僻字和表情符号的显示。
+
 ## 图片（images）
 
 可复用的源图与生成的显示资产放在 `images/`。

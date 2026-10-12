@@ -13,6 +13,7 @@ run_static_checks() {
     local test_dir
 
     python3 tools/check_repo.py
+    python3 tools/check_passport_fonts.py
 
     actionlint_bin="${ACTIONLINT_BIN:-}"
     if [[ -z "${actionlint_bin}" ]]; then
@@ -32,6 +33,22 @@ run_static_checks() {
         tests/test_demo_navigation.c main/demo_navigation.c \
         -o "${test_dir}/test_demo_navigation"
     "${test_dir}/test_demo_navigation"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_passport_app_model.c main/passport_app_model.c \
+        -o "${test_dir}/test_passport_app_model"
+    "${test_dir}/test_passport_app_model"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_passport_display_policy.c main/passport_display_policy.c \
+        -o "${test_dir}/test_passport_display_policy"
+    "${test_dir}/test_passport_display_policy"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_passport_location_model.c main/passport_location_model.c \
+        -o "${test_dir}/test_passport_location_model"
+    "${test_dir}/test_passport_location_model"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_passport_location_protocol.c main/passport_location_protocol.c \
+        -o "${test_dir}/test_passport_location_protocol"
+    "${test_dir}/test_passport_location_protocol"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Icomponents/bsp/src \
         tests/test_bsp_display_rounding.c components/bsp/src/bsp_display_rounding.c \
         -o "${test_dir}/test_bsp_display_rounding"
