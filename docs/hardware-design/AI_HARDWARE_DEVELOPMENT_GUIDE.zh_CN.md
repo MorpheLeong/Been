@@ -100,7 +100,7 @@ app_main
   └─ AI Passport 主界面、轨迹历史、打卡清单与二维码页
 ```
 
-产品应用启动后直接进入新设计的界面，不再显示 demo 菜单。NimBLE GATT 服务在产品应用生命周期内保持运行，供手机连接、订阅通知并接收轨迹记录/打卡请求。Android 配套端负责清单顺序、最多 3 个星标及最多 10 张二维码的选择；Passport 仅保存最新的校验快照并处理显示/导航。坐标与二维码原文默认保留在手机，选中的二维码原文会同步到 Passport 供显示。v3 帧格式见 `docs/protocols/passport-companion-ble.zh_CN.md`，`docs/protocols/location-capture-ble.zh_CN.md` 记录旧版轨迹协议历史。BLE 配对/加密和实机验收尚未完成。显示/LVGL 与按键是硬依赖；电池读数为可选功能。demo 源文件仍作为参考保留，但不会编入产品镜像。
+产品应用启动后直接进入新设计的界面，不再显示 demo 菜单。NimBLE GATT 服务在产品应用生命周期内保持运行，供手机连接、订阅通知并接收轨迹记录/打卡请求。Android 配套端负责清单顺序、最多 3 个星标及最多 10 张二维码的选择；Passport 仅保存最新的校验快照并处理显示/导航。坐标与二维码原文默认保留在手机，选中的二维码原文会同步到 Passport 供显示。v3 帧格式见 `docs/protocols/passport-companion-ble.zh_CN.md`，`docs/protocols/location-capture-ble.zh_CN.md` 记录旧版轨迹协议历史。BLE 数据链路强制使用设备屏显配对码建立已绑定、已认证的 LE Secure Connections；真机验收与存储安全仍需另行评审。显示/LVGL 与按键是硬依赖；电池读数为可选功能。demo 源文件仍作为参考保留，但不会编入产品镜像。
 
 公开 BSP API 位于 `components/bsp/include/`：
 
@@ -248,7 +248,7 @@ SOC 准确度取决于电芯与 profile 的匹配程度。本驱动给出的是�
 
 ## 10. Flash、控制台和资源预算
 
-默认自定义固件基线使用 8 MB Flash。`sdkconfig.defaults` 固定使用 8 MB Flash 镜像配置，并关闭 `CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE`（不按探测容量回写镜像头，便于 `idf.py merge-bin`）；默认 `partitions.csv` 只提供 24 KB NVS、4 KB PHY data，以及从 `0x10000` 延伸到 Flash 末尾的 factory app（大小 `0x7F0000`）。它没有 OTA、设备身份或未使用的预留分区。用户固件可以把它替换成其它合法的 8 MB 分区布局。若实机探测结果不是 8 MB，则该设备不符合当前硬件基线；修改项目默认值前应先确认板卡和 Flash 料号。
+产品固件使用 8 MB Flash。`sdkconfig.defaults` 固定使用 8 MB Flash 镜像配置，并关闭 `CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE`（不按探测容量回写镜像头，便于 `idf.py merge-bin`）；`partitions.csv` 提供 24 KB 系统 NVS、4 KB PHY data、大小 `0x770000` 的 factory app，以及位于 `0x780000` 的 512 KB 独立应用数据 NVS。大快照不再占用系统 NVS，从而为蓝牙绑定密钥保留空间。布局不含 OTA 槽。用户固件可以把它替换成其它合法的 8 MB 分区布局。若实机探测结果不是 8 MB，则该设备不符合当前硬件基线；修改项目默认值前应先确认板卡和 Flash 料号。
 
 从 `0x0` 写入合并镜像时，单文件中的间隙填充可能重置 NVS。需要保留已存应用
 状态时，应使用分段 `idf.py flash`。详见[固件布局](../development/engineering/firmware-layout.zh_CN.md)。

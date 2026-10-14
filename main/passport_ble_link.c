@@ -1,7 +1,9 @@
 #include "passport_ble_link.h"
 
 #include "esp_log.h"
+#include "esp_random.h"
 #include "nvs_flash.h"
+#include "passport_ble_ids.h"
 #include "passport_trip_store.h"
 #include "passport_display_policy.h"
 #include "freertos/FreeRTOS.h"
@@ -9,6 +11,7 @@
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
 #include "host/ble_hs.h"
+#include "host/ble_store.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
@@ -17,39 +20,69 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
+#include <stdlib.h>
 #include <string.h>
 
+void ble_store_config_init(void);
+
 #define DEVICE_NAME "AI Passport"
+#define PASSPORT_BLE_MAX_ATT_MTU 247U
+#define PASSPORT_BLE_MAX_WRITE_BYTES (PASSPORT_BLE_MAX_ATT_MTU - 3U)
 static const char *TAG = "passport_ble";
-static const ble_uuid128_t SERVICE_UUID = BLE_UUID128_INIT(
-    0x41, 0x49, 0x50, 0x01, 0x8c, 0x6e, 0x4a, 0x21,
-    0xa9, 0x10, 0x41, 0x50, 0x00, 0x00, 0x00, 0x01);
-static const ble_uuid128_t REQUEST_UUID = BLE_UUID128_INIT(
-    0x41, 0x49, 0x50, 0x02, 0x8c, 0x6e, 0x4a, 0x21,
-    0xa9, 0x10, 0x41, 0x50, 0x00, 0x00, 0x00, 0x01);
-static const ble_uuid128_t RESULT_UUID = BLE_UUID128_INIT(
-    0x41, 0x49, 0x50, 0x03, 0x8c, 0x6e, 0x4a, 0x21,
-    0xa9, 0x10, 0x41, 0x50, 0x00, 0x00, 0x00, 0x01);
-static const ble_uuid128_t SNAPSHOT_UUID = BLE_UUID128_INIT(
-    0x41, 0x49, 0x50, 0x04, 0x8c, 0x6e, 0x4a, 0x21,
-    0xa9, 0x10, 0x41, 0x50, 0x00, 0x00, 0x00, 0x01);
+static const ble_uuid128_t SERVICE_UUID = BLE_UUID128_INIT(PASSPORT_BLE_SERVICE_UUID_BYTES);
+static const ble_uuid128_t REQUEST_UUID = BLE_UUID128_INIT(PASSPORT_BLE_COMMAND_UUID_BYTES);
+static const ble_uuid128_t RESULT_UUID = BLE_UUID128_INIT(PASSPORT_BLE_RESULT_UUID_BYTES);
+static const ble_uuid128_t SNAPSHOT_UUID = BLE_UUID128_INIT(PASSPORT_BLE_SNAPSHOT_UUID_BYTES);
 
 static uint16_t s_request_value_handle;
 static passport_trip_model_t *s_trip_model;
-static passport_trip_model_t s_trip_backup;
 static passport_trip_rx_t s_trip_rx;
 static volatile uint16_t s_connection = BLE_HS_CONN_HANDLE_NONE;
 static volatile bool s_request_subscribed;
+static volatile bool s_request_indications;
+static volatile bool s_link_secured;
+static volatile uint32_t s_pairing_code;
 static uint8_t s_address_type;
 static bool s_started;
 static bool s_start_requested;
 static passport_ble_event_cb_t s_callback;
 static void *s_callback_context;
 
-static void notify_app(passport_ble_event_t event,
+typedef struct {
+    bool active;
+    bool waiting_tx;
+    uint8_t opcode;
+    uint16_t request_id;
+    uint8_t payload[2 + PASSPORT_TRIP_ID_BYTES + PASSPORT_TRIP_NAME_BYTES];
+    size_t payload_length;
+    size_t offset;
+    size_t in_flight_length;
+} passport_request_tx_t;
+
+static passport_request_tx_t s_request_tx;
+
+static bool notify_app(passport_ble_event_t event,
                        const passport_ble_result_t *result)
 {
-    if (s_callback != NULL) s_callback(event, result, s_callback_context);
+    return s_callback != NULL && s_callback(event, result, s_callback_context);
+}
+
+static void clear_request_tx(void)
+{
+    memset(&s_request_tx, 0, sizeof(s_request_tx));
+}
+
+static esp_err_t send_next_request_frame(void);
+
+static void log_memory(const char *stage)
+{
+    const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    ESP_LOGI(TAG, "memory %s: free=%u minimum=%u largest=%u stack_free=%u",
+             stage,
+             (unsigned)heap_caps_get_free_size(caps),
+             (unsigned)heap_caps_get_minimum_free_size(caps),
+             (unsigned)heap_caps_get_largest_free_block(caps),
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }
 
 static int result_access(uint16_t connection, uint16_t attribute,
@@ -70,7 +103,10 @@ static int result_access(uint16_t connection, uint16_t attribute,
     passport_ble_result_t result;
     if (!passport_location_protocol_decode_result(frame, length, &result))
         return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
-    notify_app(PASSPORT_BLE_RESULT, &result);
+    ESP_LOGI(TAG, "received result id=%u success=%d error=%u",
+             (unsigned)result.request_id, result.success, (unsigned)result.error_code);
+    if (!notify_app(PASSPORT_BLE_RESULT, &result))
+        return BLE_ATT_ERR_INSUFFICIENT_RES;
     return 0;
 }
 
@@ -80,7 +116,7 @@ static int snapshot_access(uint16_t connection, uint16_t attribute,
     (void)connection; (void)attribute; (void)arg;
     if (context->op != BLE_GATT_ACCESS_OP_WRITE_CHR || s_trip_model == NULL)
         return BLE_ATT_ERR_UNLIKELY;
-    uint8_t frame[20];
+    uint8_t frame[PASSPORT_BLE_MAX_WRITE_BYTES];
     uint16_t length = 0;
     if (OS_MBUF_PKTLEN(context->om) > sizeof(frame) ||
         ble_hs_mbuf_to_flat(context->om, frame, sizeof(frame), &length) != 0)
@@ -95,15 +131,41 @@ static int snapshot_access(uint16_t connection, uint16_t attribute,
         notify_app(PASSPORT_BLE_SETTINGS, NULL);
         return 0;
     }
-    if (frame[1] == PASSPORT_SNAPSHOT_COMMIT_OPCODE)
-        s_trip_backup = *s_trip_model;
-    if (!passport_trip_sync_frame(&s_trip_rx, s_trip_model, frame, length))
+    if (frame[1] == PASSPORT_TIME_SYNC_OPCODE) {
+        passport_ble_result_t time_result = { .success = true };
+        if (!passport_time_sync_decode(frame, length, &time_result.timestamp_utc,
+                                       &time_result.utc_offset_minutes))
+            return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
+        ESP_LOGI(TAG, "received time utc=%lld offset=%d",
+                 (long long)time_result.timestamp_utc,
+                 (int)time_result.utc_offset_minutes);
+        if (!notify_app(PASSPORT_BLE_TIME, &time_result))
+            return BLE_ATT_ERR_INSUFFICIENT_RES;
+        return 0;
+    }
+    const bool committing = frame[1] == PASSPORT_SNAPSHOT_COMMIT_OPCODE;
+    passport_trip_model_t *candidate = NULL;
+    passport_trip_model_t *target = s_trip_model;
+    if (committing) {
+        candidate = heap_caps_malloc(sizeof(*candidate), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (candidate == NULL) {
+            log_memory("snapshot-candidate-failed");
+            return BLE_ATT_ERR_INSUFFICIENT_RES;
+        }
+        target = candidate;
+    }
+    if (!passport_trip_sync_frame(&s_trip_rx, target, frame, length)) {
+        free(candidate);
         return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
-    if (frame[1] == PASSPORT_SNAPSHOT_COMMIT_OPCODE) {
-        if (passport_trip_store_save(s_trip_model) != ESP_OK) {
-            *s_trip_model = s_trip_backup;
+    }
+    if (committing) {
+        if (passport_trip_store_save(candidate) != ESP_OK) {
+            free(candidate);
             return BLE_ATT_ERR_UNLIKELY;
         }
+        *s_trip_model = *candidate;
+        free(candidate);
+        log_memory("snapshot-committed");
         notify_app(PASSPORT_BLE_SNAPSHOT, NULL);
     }
     return 0;
@@ -127,18 +189,22 @@ static const struct ble_gatt_svc_def GATT_SERVICES[] = {
             {
                 .uuid = &REQUEST_UUID.u,
                 .access_cb = request_access,
-                .flags = BLE_GATT_CHR_F_NOTIFY,
+                .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_INDICATE |
+                         BLE_GATT_CHR_F_READ_AUTHEN,
+                .min_key_size = 16,
                 .val_handle = &s_request_value_handle,
             },
             {
                 .uuid = &RESULT_UUID.u,
                 .access_cb = result_access,
-                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
+                .min_key_size = 16,
             },
             {
                 .uuid = &SNAPSHOT_UUID.u,
                 .access_cb = snapshot_access,
-                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
+                .min_key_size = 16,
             },
             { 0 },
         },
@@ -151,11 +217,20 @@ static int advertise(void);
 static int gap_event(struct ble_gap_event *event, void *arg)
 {
     (void)arg;
+    struct ble_gap_conn_desc desc;
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
             s_connection = event->connect.conn_handle;
+            s_link_secured = false;
+            ESP_LOGI(TAG, "central connected; handle=%u, starting authenticated encryption",
+                     (unsigned)s_connection);
+            const int rc = ble_gap_security_initiate(s_connection);
+            if (rc != 0 && rc != BLE_HS_EALREADY)
+                ESP_LOGW(TAG, "security initiation failed: %d", rc);
+            log_memory("connected");
         } else if (s_start_requested) {
+            ESP_LOGW(TAG, "connection attempt failed: %d", event->connect.status);
             const int rc = advertise();
             if (rc != 0) {
                 ESP_LOGE(TAG, "BLE restart advertising failed: %d", rc);
@@ -164,8 +239,13 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         }
         break;
     case BLE_GAP_EVENT_DISCONNECT:
+        ESP_LOGI(TAG, "central disconnected; reason=%d", event->disconnect.reason);
         s_connection = BLE_HS_CONN_HANDLE_NONE;
         s_request_subscribed = false;
+        s_request_indications = false;
+        clear_request_tx();
+        s_link_secured = false;
+        s_pairing_code = 0;
         notify_app(PASSPORT_BLE_DISCONNECTED, NULL);
         if (s_start_requested) {
             const int rc = advertise();
@@ -185,10 +265,85 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         }
         break;
     case BLE_GAP_EVENT_SUBSCRIBE:
+        ESP_LOGI(TAG, "subscription changed; attr=%u notify=%d indicate=%d",
+                 (unsigned)event->subscribe.attr_handle,
+                 event->subscribe.cur_notify, event->subscribe.cur_indicate);
         if (event->subscribe.attr_handle == s_request_value_handle) {
-            s_request_subscribed = event->subscribe.cur_notify;
-            notify_app(s_request_subscribed ? PASSPORT_BLE_CONNECTED
+            s_request_indications = event->subscribe.cur_indicate;
+            s_request_subscribed = event->subscribe.cur_notify ||
+                                   event->subscribe.cur_indicate;
+            notify_app(s_request_subscribed && s_link_secured ? PASSPORT_BLE_CONNECTED
                                             : PASSPORT_BLE_DISCONNECTED, NULL);
+        }
+        break;
+    case BLE_GAP_EVENT_NOTIFY_TX:
+        if (event->notify_tx.attr_handle != s_request_value_handle ||
+            !s_request_tx.active || !s_request_tx.waiting_tx) break;
+        if (event->notify_tx.indication && event->notify_tx.status == 0) break;
+        if ((!event->notify_tx.indication && event->notify_tx.status != 0) ||
+            (event->notify_tx.indication && event->notify_tx.status != BLE_HS_EDONE)) {
+            ESP_LOGW(TAG, "request delivery failed: status=%d indication=%d",
+                     event->notify_tx.status, event->notify_tx.indication);
+            clear_request_tx();
+            notify_app(PASSPORT_BLE_REQUEST_FAILED, NULL);
+            break;
+        }
+        s_request_tx.waiting_tx = false;
+        s_request_tx.offset += s_request_tx.in_flight_length;
+        if ((s_request_tx.opcode == PASSPORT_LOCATION_REQUEST_OPCODE &&
+             s_request_tx.offset >= 1) ||
+            (s_request_tx.opcode != PASSPORT_LOCATION_REQUEST_OPCODE &&
+             s_request_tx.offset >= s_request_tx.payload_length)) {
+            clear_request_tx();
+        } else if (send_next_request_frame() != ESP_OK) {
+            clear_request_tx();
+            notify_app(PASSPORT_BLE_REQUEST_FAILED, NULL);
+        }
+        break;
+    case BLE_GAP_EVENT_ENC_CHANGE:
+        s_link_secured = event->enc_change.status == 0 &&
+                         ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0 &&
+                         desc.sec_state.encrypted && desc.sec_state.authenticated &&
+                         desc.sec_state.key_size == 16;
+        s_pairing_code = 0;
+        if (!s_link_secured) {
+            ESP_LOGW(TAG, "authenticated encryption unavailable: %d", event->enc_change.status);
+            notify_app(PASSPORT_BLE_FAILED, NULL);
+            if (ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0) {
+                const int delete_rc = ble_store_util_delete_peer(&desc.peer_id_addr);
+                ESP_LOGW(TAG, "removed stale peer keys after security failure: %d", delete_rc);
+            }
+            const int terminate_rc = ble_gap_terminate(event->enc_change.conn_handle,
+                                                       BLE_ERR_REM_USER_CONN_TERM);
+            if (terminate_rc != 0 && terminate_rc != BLE_HS_ENOTCONN)
+                ESP_LOGW(TAG, "failed to terminate insecure connection: %d", terminate_rc);
+        } else if (s_request_subscribed) {
+            ESP_LOGI(TAG, "authenticated encrypted link established; key_size=%u",
+                     (unsigned)desc.sec_state.key_size);
+            notify_app(PASSPORT_BLE_CONNECTED, NULL);
+            log_memory("encrypted");
+        }
+        break;
+    case BLE_GAP_EVENT_REPEAT_PAIRING:
+        if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) != 0)
+            return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        ESP_LOGW(TAG, "repeat pairing requested; deleting stale peer keys");
+        ble_store_util_delete_peer(&desc.peer_id_addr);
+        return BLE_GAP_REPEAT_PAIRING_RETRY;
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+        if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
+            struct ble_sm_io passkey = { 0 };
+            passkey.action = BLE_SM_IOACT_DISP;
+            passkey.passkey = 100000 + esp_random() % 900000;
+            s_pairing_code = passkey.passkey;
+            notify_app(PASSPORT_BLE_PAIRING_CODE, NULL);
+            const int rc = ble_sm_inject_io(event->passkey.conn_handle, &passkey);
+            if (rc != 0) {
+                s_pairing_code = 0;
+                ESP_LOGE(TAG, "passkey injection failed: %d", rc);
+                notify_app(PASSPORT_BLE_FAILED, NULL);
+                return rc;
+            }
         }
         break;
     default:
@@ -227,6 +382,10 @@ static void on_reset(int reason)
 {
     s_connection = BLE_HS_CONN_HANDLE_NONE;
     s_request_subscribed = false;
+    s_request_indications = false;
+    clear_request_tx();
+    s_link_secured = false;
+    s_pairing_code = 0;
     ESP_LOGE(TAG, "NimBLE host reset: %d", reason);
     notify_app(PASSPORT_BLE_FAILED, NULL);
 }
@@ -256,6 +415,9 @@ esp_err_t passport_ble_link_start(passport_ble_event_cb_t callback, void *contex
     s_callback_context = context;
     s_start_requested = false;
     s_connection = BLE_HS_CONN_HANDLE_NONE;
+    s_request_subscribed = false;
+    s_request_indications = false;
+    clear_request_tx();
 
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) return err; // Preserve user NVS; never auto-erase.
@@ -267,6 +429,7 @@ esp_err_t passport_ble_link_start(passport_ble_event_cb_t callback, void *contex
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         return err;
     }
+    log_memory("nimble-ready");
     s_started = true;
     ble_svc_gap_init();
     ble_svc_gatt_init();
@@ -277,6 +440,14 @@ esp_err_t passport_ble_link_start(passport_ble_event_cb_t callback, void *contex
 
     ble_hs_cfg.reset_cb = on_reset;
     ble_hs_cfg.sync_cb = on_sync;
+    ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
+    ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_ONLY;
+    ble_hs_cfg.sm_bonding = 1;
+    ble_hs_cfg.sm_mitm = 1;
+    ble_hs_cfg.sm_sc = 1;
+    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_store_config_init();
     s_start_requested = true;
     if (xTaskCreatePinnedToCore(host_task, "passport_ble", NIMBLE_HS_STACK_SIZE,
                                 NULL, configMAX_PRIORITIES - 4, NULL,
@@ -301,16 +472,67 @@ void passport_ble_link_bind_trip_model(passport_trip_model_t *model)
 
 esp_err_t passport_ble_link_request_location(uint16_t request_id)
 {
-    if (s_connection == BLE_HS_CONN_HANDLE_NONE || !s_request_subscribed)
+    if (s_connection == BLE_HS_CONN_HANDLE_NONE || !s_request_subscribed || !s_link_secured)
         return ESP_ERR_INVALID_STATE;
-    uint8_t frame[PASSPORT_LOCATION_REQUEST_SIZE];
-    const size_t length = passport_location_protocol_encode_request(
-        request_id, frame, sizeof(frame));
-    if (length != sizeof(frame)) return ESP_ERR_INVALID_SIZE;
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(frame, length);
+    if (s_request_tx.active) return ESP_ERR_INVALID_STATE;
+    clear_request_tx();
+    s_request_tx.active = true;
+    s_request_tx.opcode = PASSPORT_LOCATION_REQUEST_OPCODE;
+    s_request_tx.request_id = request_id;
+    const esp_err_t err = send_next_request_frame();
+    if (err != ESP_OK) clear_request_tx();
+    return err;
+}
+
+static esp_err_t send_next_request_frame(void)
+{
+    if (!s_request_tx.active || s_request_tx.waiting_tx ||
+        s_connection == BLE_HS_CONN_HANDLE_NONE || !s_request_subscribed || !s_link_secured)
+        return ESP_ERR_INVALID_STATE;
+
+    uint8_t frame[20];
+    size_t frame_length = 0;
+    size_t delivered_length = 0;
+    if (s_request_tx.opcode == PASSPORT_LOCATION_REQUEST_OPCODE) {
+        frame_length = passport_location_protocol_encode_request(
+            s_request_tx.request_id, frame, sizeof(frame));
+        delivered_length = frame_length == PASSPORT_LOCATION_REQUEST_SIZE ? 1 : 0;
+    } else {
+        const size_t remaining = s_request_tx.payload_length - s_request_tx.offset;
+        const size_t part = remaining < 11 ? remaining : 11;
+        frame[0] = PASSPORT_LOCATION_PROTOCOL_VERSION;
+        frame[1] = PASSPORT_CHECKIN_FRAGMENT_OPCODE;
+        frame[2] = s_request_tx.opcode;
+        frame[3] = (uint8_t)s_request_tx.request_id;
+        frame[4] = (uint8_t)(s_request_tx.request_id >> 8);
+        frame[5] = (uint8_t)s_request_tx.payload_length;
+        frame[6] = (uint8_t)(s_request_tx.payload_length >> 8);
+        frame[7] = (uint8_t)s_request_tx.offset;
+        frame[8] = (uint8_t)(s_request_tx.offset >> 8);
+        memcpy(frame + 9, s_request_tx.payload + s_request_tx.offset, part);
+        frame_length = 9 + part;
+        delivered_length = part;
+    }
+    if (delivered_length == 0) return ESP_ERR_INVALID_SIZE;
+
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(frame, frame_length);
     if (om == NULL) return ESP_ERR_NO_MEM;
-    const int rc = ble_gatts_notify_custom(s_connection, s_request_value_handle, om);
-    return rc == 0 ? ESP_OK : ESP_FAIL;
+    s_request_tx.waiting_tx = true;
+    s_request_tx.in_flight_length = delivered_length;
+    const int rc = s_request_indications
+        ? ble_gatts_indicate_custom(s_connection, s_request_value_handle, om)
+        : ble_gatts_notify_custom(s_connection, s_request_value_handle, om);
+    if (rc != 0) {
+        s_request_tx.waiting_tx = false;
+        s_request_tx.in_flight_length = 0;
+        ESP_LOGW(TAG, "request transmit start failed: %d", rc);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "request frame sent id=%u opcode=%u offset=%u length=%u mode=%s",
+             (unsigned)s_request_tx.request_id, (unsigned)s_request_tx.opcode,
+             (unsigned)s_request_tx.offset, (unsigned)frame_length,
+             s_request_indications ? "indicate" : "notify");
+    return ESP_OK;
 }
 
 static esp_err_t request_destination_state(uint16_t request_id,
@@ -319,7 +541,7 @@ static esp_err_t request_destination_state(uint16_t request_id,
                                           const char *destination_name)
 {
     if (destination_id == NULL || destination_name == NULL ||
-        s_connection == BLE_HS_CONN_HANDLE_NONE || !s_request_subscribed)
+        s_connection == BLE_HS_CONN_HANDLE_NONE || !s_request_subscribed || !s_link_secured)
         return ESP_ERR_INVALID_STATE;
     const size_t id_length = strnlen(destination_id, PASSPORT_TRIP_ID_BYTES);
     const size_t name_length = strnlen(destination_name, PASSPORT_TRIP_NAME_BYTES);
@@ -327,31 +549,22 @@ static esp_err_t request_destination_state(uint16_t request_id,
         name_length == 0 || name_length >= PASSPORT_TRIP_NAME_BYTES)
         return ESP_ERR_INVALID_ARG;
 
+    if (s_request_tx.active) return ESP_ERR_INVALID_STATE;
     uint8_t payload[2 + PASSPORT_TRIP_ID_BYTES + PASSPORT_TRIP_NAME_BYTES];
     size_t used = 0;
     payload[used++] = (uint8_t)id_length;
     memcpy(payload + used, destination_id, id_length); used += id_length;
     payload[used++] = (uint8_t)name_length;
     memcpy(payload + used, destination_name, name_length); used += name_length;
-    const size_t chunk_size = 11;
-    for (size_t offset = 0; offset < used; offset += chunk_size) {
-        uint8_t frame[20] = {
-            PASSPORT_LOCATION_PROTOCOL_VERSION,
-            PASSPORT_CHECKIN_FRAGMENT_OPCODE,
-            opcode,
-            (uint8_t)request_id, (uint8_t)(request_id >> 8),
-            (uint8_t)used, (uint8_t)(used >> 8),
-            (uint8_t)offset, (uint8_t)(offset >> 8),
-        };
-        const size_t part = (used - offset) < chunk_size ? used - offset : chunk_size;
-        memcpy(frame + 9, payload + offset, part);
-        struct os_mbuf *om = ble_hs_mbuf_from_flat(frame, 9 + part);
-        if (om == NULL) return ESP_ERR_NO_MEM;
-        const int rc = ble_gatts_notify_custom(s_connection, s_request_value_handle, om);
-        if (rc != 0) return ESP_FAIL;
-        if (offset + part < used) vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    return ESP_OK;
+    clear_request_tx();
+    s_request_tx.active = true;
+    s_request_tx.opcode = opcode;
+    s_request_tx.request_id = request_id;
+    memcpy(s_request_tx.payload, payload, used);
+    s_request_tx.payload_length = used;
+    const esp_err_t err = send_next_request_frame();
+    if (err != ESP_OK) clear_request_tx();
+    return err;
 }
 
 esp_err_t passport_ble_link_request_checkin(uint16_t request_id,
@@ -372,5 +585,10 @@ esp_err_t passport_ble_link_request_uncheckin(uint16_t request_id,
 
 bool passport_ble_link_is_connected(void)
 {
-    return s_connection != BLE_HS_CONN_HANDLE_NONE;
+    return s_connection != BLE_HS_CONN_HANDLE_NONE && s_request_subscribed && s_link_secured;
+}
+
+uint32_t passport_ble_link_pairing_code(void)
+{
+    return s_pairing_code;
 }

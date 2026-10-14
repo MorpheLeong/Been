@@ -66,6 +66,9 @@ bool passport_trip_model_complete(passport_trip_model_t *model,
 bool passport_trip_model_set_completed(passport_trip_model_t *model,
                                        const char *destination_id,
                                        bool completed);
+/* On a valid commit, writes the decoded snapshot to model. A failed commit may
+ * leave model as scratch data, so callers must pass a disposable candidate and
+ * publish it only after persistence succeeds. Begin/chunk frames do not touch it. */
 bool passport_trip_sync_frame(passport_trip_rx_t *rx,
                               passport_trip_model_t *model,
                               const uint8_t *frame, size_t length);

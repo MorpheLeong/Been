@@ -13,11 +13,17 @@ Scan for the service UUID below. The device name is AI Passport.
 | Purpose | UUID | Properties |
 | --- | --- | --- |
 | Passport service | 01504941-6E8C-214A-10A9-415000000001 | Primary service |
-| Device commands | 02504941-6E8C-214A-10A9-415000000001 | Notify |
-| App result | 03504941-6E8C-214A-10A9-415000000001 | Write / Write Without Response |
-| App snapshot sync | 04504941-6E8C-214A-10A9-415000000001 | Write / Write Without Response |
+| Device commands | 02504941-6E8C-214A-10A9-415000000001 | Indicate preferred, Notify fallback, authenticated |
+| App result | 03504941-6E8C-214A-10A9-415000000001 | Write, authenticated |
+| App snapshot sync | 04504941-6E8C-214A-10A9-415000000001 | Write, authenticated |
 
 Multi-byte integers are little-endian. The Android app maintains the connection with connectedDevice and location foreground-service types and shows a system notification. Android can still stop the process after force-stop, reboot, permission revocation, or OEM battery management; this is not an unconditional keep-alive guarantee.
+
+## Link security and pairing
+
+The GATT data path requires bonded, authenticated LE Secure Connections with a 128-bit key. On first connection, Passport shows a random six-digit passkey; enter that passkey in Android's system pairing dialog. Bond keys are retained in NVS and reused on later encrypted connections. The app does not accept a device by its advertised name: discovery and service validation require the exact service and characteristic UUIDs above.
+
+On first use, the app opens Android system Bluetooth settings and lets the system handle passkey entry and bonding. The app no longer calls `createBond()` or uses its own timer to decide whether system pairing completed. After Android shows AI Passport as paired, return to the app and tap Connect device. After upgrading from firmware that did not enforce secure pairing, remove the old AI Passport entry from Android Bluetooth settings before pairing again. A rejected or stale bond never enables command notifications or app writes. BLE link encryption protects data in transit between the bonded phone and Passport; QR payloads are still stored in application/device storage rather than being separately encrypted by protocol v3.
 
 ## Device commands
 
@@ -27,7 +33,9 @@ Four bytes: version 0x03, opcode 0x01, request ID uint16. The app obtains the cu
 
 ### Checklist check-in
 
-To fit the default ATT MTU, the device sends ordered notification fragments:
+To fit the default ATT MTU, the device sends ordered indication fragments and waits for the
+central's confirmation before sending the next fragment. Notification mode remains a legacy
+fallback and is sequenced from transmit-completion events:
 
 | Bytes | Content |
 | --- | --- |
@@ -55,18 +63,25 @@ The device stores only the timestamp and checklist item name from a successful r
 
 A snapshot contains up to 64 destinations and up to 10 QR codes. QR names are at most 48 bytes and payloads at most 192 bytes. Up to three starred codes claim slots first; remaining slots are filled by QR codes for incomplete destinations in checklist order, then by completed destinations if space remains. A destination can bind to at most one QR code. The app is the sole owner of ordering, starring, completion, and rolling-window rules.
 
-The app sends acknowledged GATT writes serially, waiting for each write callback:
+Only an explicit tap on the top-right Sync button sends checklist, QR, and screen-timeout data through acknowledged GATT writes, serially waiting for each write callback. Editing the checklist, QR codes, profile, or settings saves locally and does not automatically generate synchronization traffic. The BLE connection stays active so it can receive track and check-in requests initiated by Passport.
 
 - Begin frame (10 bytes): version 0x03, opcode 0x10, revision uint16, payload length uint16, CRC32 uint32.
-- Data frame: version 0x03, opcode 0x11, revision uint16, offset uint16, up to 14 data bytes.
+- Data frame: version 0x03, opcode 0x11, revision uint16, offset uint16, with ATT MTU minus 9 data bytes: 14 bytes at the default MTU 23 or up to 238 bytes at MTU 247.
 - Commit frame (4 bytes): version 0x03, opcode 0x12, revision uint16.
+
+Android requests MTU 247 after connecting and sizes chunks from the negotiated result; it
+falls back to 14-byte chunks when negotiation fails or the peer retains the default MTU.
+Writes remain acknowledged and serialized with at most one operation in flight, and a failed
+frame is retried at most twice, so the larger MTU does not change ordering, CRC, or transactional
+commit semantics. A future iOS client should derive the same chunk size from the system-reported
+maximum write length instead of assuming a fixed MTU.
 
 The payload contains destination count uint8; each destination has ID length and ID, name length and name, and completion status uint8; then QR count uint8; each QR has ID length and ID, name length and name, payload length and payload, starred status uint8, and bound destination ID length and ID. String lengths count UTF-8 bytes. CRC uses standard CRC-32/ISO-HDLC. The device replaces and persists the snapshot only after receiving and validating the complete snapshot; malformed data or a CRC mismatch leaves the previous snapshot intact.
 
 ## Limits
 
 - Exact coordinates, the full QR library, and map edits remain on the phone; the device caches only the current snapshot and up to ten QR payloads.
-- BLE pairing/encryption is not implemented yet. Do not use real payment codes or other sensitive QR payloads in an exposed test environment; link security must be added before real-device trials.
+- BLE traffic is authenticated and encrypted after pairing. Storage encryption, application-layer end-to-end encryption, and production hardware acceptance remain separate review items; do not treat a successful build as a complete security certification.
 - The device generates QR codes locally with a maximum Version 10 and low error correction. The 192-byte limit and scan quality still require verification on the target display with real phone scanners.
 
 
@@ -78,6 +93,12 @@ The snapshot adds UTF-8 nickname (up to 48 bytes), bio (96 bytes), up to four so
 ## Screen timeout setting and device navigation
 
 Write four bytes to the snapshot characteristic: `03 13 LL HH`. The last two bytes are timeout seconds as uint16 little-endian, accepted from 15 through 600; the default is 60. This independent setting does not change the snapshot format or revision. The device acknowledges success after persisting the value under NVS key `screen_secs` in namespace `passport_trip`; invalid frames or persistence failures receive a GATT error. Send it after the snapshot commit using acknowledged writes. Older firmware may accept the snapshot but reject this setting; clients must report that partial failure.
+
+Each secure connection sends one eight-byte time frame, and manual synchronization sends it again at the end: version `03`, opcode
+`14`, Unix UTC seconds as uint32, and local UTC offset minutes as little-endian int16. A valid
+frame updates the device clock and header immediately without requiring a successful track or
+check-in. The time frame is not persisted to NVS, so it must be sent again by reconnecting or
+manually synchronizing after the device restarts.
 
 Android offers 15/30/60/120/300/600 seconds. A future iOS client should use the same command, range, and acknowledgement rules. Timeout counts physical button inactivity using a monotonic clock; clock refresh and BLE events do not extend it. Turning off the backlight keeps BLE running. The first button gesture wakes the screen without activating an action, and changing the timeout while dark does not wake it.
 

@@ -49,6 +49,14 @@ run_static_checks() {
         tests/test_passport_location_protocol.c main/passport_location_protocol.c \
         -o "${test_dir}/test_passport_location_protocol"
     "${test_dir}/test_passport_location_protocol"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_passport_trip_model.c main/passport_trip_model.c \
+        -o "${test_dir}/test_passport_trip_model"
+    "${test_dir}/test_passport_trip_model"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_passport_ble_ids.c \
+        -o "${test_dir}/test_passport_ble_ids"
+    "${test_dir}/test_passport_ble_ids"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Icomponents/bsp/src \
         tests/test_bsp_display_rounding.c components/bsp/src/bsp_display_rounding.c \
         -o "${test_dir}/test_bsp_display_rounding"

@@ -50,3 +50,20 @@ bool passport_location_protocol_decode_result(const uint8_t *frame,
     *result = parsed;
     return true;
 }
+
+bool passport_time_sync_decode(const uint8_t *frame, size_t length,
+                               int64_t *timestamp_utc,
+                               int16_t *utc_offset_minutes)
+{
+    if (frame == NULL || timestamp_utc == NULL || utc_offset_minutes == NULL ||
+        length != PASSPORT_TIME_SYNC_SIZE ||
+        frame[0] != PASSPORT_LOCATION_PROTOCOL_VERSION ||
+        frame[1] != PASSPORT_TIME_SYNC_OPCODE) return false;
+
+    const int64_t timestamp = read_u32_le(&frame[2]);
+    const int16_t offset = (int16_t)read_u16_le(&frame[6]);
+    if (timestamp < 1577836800 || offset < -840 || offset > 840) return false;
+    *timestamp_utc = timestamp;
+    *utc_offset_minutes = offset;
+    return true;
+}

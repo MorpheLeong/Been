@@ -4,6 +4,7 @@
 #include "bsp_display.h"
 #include "bsp_i2c.h"
 #include "bsp_pins.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -21,10 +22,11 @@
 #include "qrcode.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 
-#define INPUT_QUEUE_DEPTH 12
+#define INPUT_QUEUE_DEPTH 24
 #define SOUND_QUEUE_DEPTH 4
 #define C_BG 0x050B0A
 #define C_PANEL 0x101C18
@@ -44,7 +46,11 @@ typedef struct {
     app_event_type_t type;
     union {
         struct { bsp_btn_t btn; bsp_btn_ev_t event; } button;
-        struct { passport_ble_event_t event; passport_ble_result_t result; } ble;
+        struct {
+            passport_ble_event_t event;
+            passport_ble_result_t result;
+            uint32_t pairing_code;
+        } ble;
         uint16_t request_id;
     } data;
 } app_event_t;
@@ -65,7 +71,6 @@ static passport_app_model_t s_app;
 static passport_location_model_t s_records;
 static passport_trip_model_t s_trip;
 static lv_obj_t *s_screen;
-static lv_obj_t *s_previous_screen;
 static lv_obj_t *s_home_items[4];
 static lv_obj_t *s_marker_state_label;
 static lv_obj_t *s_marker_card;
@@ -87,7 +92,9 @@ static volatile bool s_ble_connected;
 static volatile marker_state_t s_marker_state;
 static volatile uint16_t s_active_request_id;
 static volatile uint16_t s_timeout_request_id;
+static volatile bool s_marker_timeout_pending;
 static bool s_pending_checkin;
+static bool s_pairing_visible;
 static bool s_pending_uncheckin;
 static bool s_last_action_uncheckin;
 static bool s_last_action_destination;
@@ -106,7 +113,11 @@ static lv_font_t s_cjk_fallback_14;
 static lv_font_t s_cjk_fallback_20;
 static esp_timer_handle_t s_marker_timeout;
 static const char *s_marker_note = "请先连接手机";
-static lv_color_t s_qr_pixels[130 * 130];
+static void base_screen(const char *title);
+static void show_screen(passport_screen_t screen);
+/* The image descriptor is RGB565. lv_color_t is RGB888-sized in LVGL 9 and
+ * would waste 16.9 KB while also giving the decoder the wrong pixel layout. */
+static uint16_t s_qr_pixels[130 * 130];
 static lv_image_dsc_t s_qr_image = {
     .header = {
         .magic = LV_IMAGE_HEADER_MAGIC,
@@ -114,7 +125,7 @@ static lv_image_dsc_t s_qr_image = {
         .flags = 0,
         .w = 130,
         .h = 130,
-        .stride = 130 * sizeof(lv_color_t),
+        .stride = 130 * sizeof(uint16_t),
         .reserved_2 = 0,
     },
     .data_size = sizeof(s_qr_pixels),
@@ -124,20 +135,35 @@ static bool s_qr_ready;
 
 typedef enum { SOUND_KEY = 1, SOUND_OK, SOUND_ERROR } sound_cue_t;
 
+static void log_memory(const char *stage)
+{
+    const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    ESP_LOGI(TAG, "memory %s: free=%u minimum=%u largest=%u stack_free=%u",
+             stage,
+             (unsigned)heap_caps_get_free_size(caps),
+             (unsigned)heap_caps_get_minimum_free_size(caps),
+             (unsigned)heap_caps_get_largest_free_block(caps),
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
+}
+
 static void sound_task(void *arg)
 {
     (void)arg;
-    if (bsp_audio_init() != ESP_OK || bsp_audio_set_format(16000, 16, 1) != ESP_OK) {
-        ESP_LOGW(TAG, "提示音设备初始化失败");
-        vTaskDelete(NULL);
-        return;
-    }
-    bsp_audio_set_volume(s_trip.profile.volume_percent);
     // Keep the 1.28 KB cue buffer out of this task's limited stack.
     static int16_t pcm[640];
+    bool audio_ready = false;
     sound_cue_t cue;
     for (;;) {
         if (xQueueReceive(s_sound_queue, &cue, portMAX_DELAY) != pdTRUE) continue;
+        if (!audio_ready) {
+            if (bsp_audio_init() != ESP_OK || bsp_audio_set_format(16000, 16, 1) != ESP_OK) {
+                ESP_LOGW(TAG, "提示音设备初始化失败");
+                log_memory("audio-init-failed");
+                continue;
+            }
+            audio_ready = true;
+            log_memory("audio-ready");
+        }
         bsp_audio_set_volume(s_trip.profile.volume_percent);
         const uint32_t frequency = cue == SOUND_ERROR ? 220U : (cue == SOUND_OK ? 880U : 660U);
         uint32_t phase = 0;
@@ -257,9 +283,30 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h)
 static void finish_screen(void)
 {
     lv_screen_load(s_screen);
-    if (s_previous_screen != NULL && s_previous_screen != s_screen)
-        lv_obj_delete(s_previous_screen);
-    s_previous_screen = NULL;
+}
+
+static void draw_pairing_code(uint32_t pairing_code)
+{
+    char code[7];
+    (void)snprintf(code, sizeof(code), "%06lu", (unsigned long)pairing_code);
+    base_screen("安全配对");
+    lv_obj_t *card = panel(s_screen, 16, 66, 208, 168);
+    label(card, "安全配对", 20, 18, 168, 24, C_GREEN, &passport_font_20);
+    label(card, "请在手机输入此配对码", 20, 52, 168, 20, C_WHITE, &passport_font_14);
+    label(card, code, 26, 84, 156, 34, C_AMBER, &lv_font_montserrat_20);
+    label(card, "仅接受与你手机相同的号码", 14, 128, 180, 20, C_DIM, &passport_font_14);
+    finish_screen();
+    s_pairing_visible = true;
+}
+
+static void dismiss_pairing_screen(void)
+{
+    if (!s_pairing_visible) return;
+    s_pairing_visible = false;
+    if (bsp_lvgl_lock(500)) {
+        show_screen(s_app.screen);
+        bsp_lvgl_unlock();
+    }
 }
 
 static void base_screen(const char *title)
@@ -272,8 +319,9 @@ static void base_screen(const char *title)
     s_battery_fill = NULL;
     s_phone_icon = NULL;
     s_phone_dot = NULL;
-    s_previous_screen = s_screen;
-    s_screen = lv_obj_create(NULL);
+    if (s_screen == NULL) s_screen = lv_obj_create(NULL);
+    else lv_obj_clean(s_screen);
+    memset(s_home_items, 0, sizeof(s_home_items));
     lv_obj_set_style_bg_color(s_screen, lv_color_hex(C_BG), 0);
     lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_screen, 0, 0);
@@ -378,7 +426,11 @@ static void draw_marker(void)
           &lv_font_montserrat_14);
     label(s_marker_card, destination_action ? s_active_destination_name : "由手机获取定位", 16, 52, 192, 22, C_WHITE,
           &lv_font_montserrat_14);
-    label(s_marker_card, "正在等待手机响应……", 16, 84, 194, 20, C_WHITE,
+    const char *detail = s_marker_state == MARKER_WAITING ? "正在从手机获取定位……" :
+                         (s_marker_state == MARKER_SUCCESS ? "手机已保存并确认" :
+                          (s_marker_state == MARKER_FAILURE ? "本次操作未完成" :
+                           "短按 OK 后由手机定位"));
+    label(s_marker_card, detail, 16, 84, 194, 20, C_WHITE,
           &lv_font_montserrat_14);
     label(s_marker_card, s_pending_uncheckin ? "只更新清单，不改动轨迹" : "定位信息保存在手机端", 16, 106, 194, 20, C_WHITE,
           &lv_font_montserrat_14);
@@ -491,8 +543,8 @@ static void qr_render_callback(esp_qrcode_handle_t code)
 {
     const int size = esp_qrcode_get_size(code);
     if (size < 21 || size > 57) return;
-    const lv_color_t white = lv_color_hex(0xFFFFFF);
-    const lv_color_t black = lv_color_hex(0x000000);
+    const uint16_t white = 0xFFFFU;
+    const uint16_t black = 0x0000U;
     for (size_t i = 0; i < 130U * 130U; ++i) s_qr_pixels[i] = white;
     const int scale = 2;
     const int quiet = 4;
@@ -560,6 +612,7 @@ static void draw_qr(void)
     config.max_qrcode_version = 10;
     config.qrcode_ecc_level = ESP_QRCODE_ECC_LOW;
     const esp_err_t encoded = esp_qrcode_generate(&config, qr->payload);
+    log_memory("qr-generated");
     if (encoded != ESP_OK || !s_qr_ready) {
         label(s_screen, "二维码内容太长", 12, 118, 216, 24, C_AMBER, &lv_font_montserrat_14);
         label(s_screen, "请在手机端换用较短内容", 12, 148, 216, 20, C_DIM, &lv_font_montserrat_14);
@@ -590,24 +643,24 @@ static void show_screen(passport_screen_t screen)
     }
 }
 
-static void ble_event_callback(passport_ble_event_t event,
+static bool ble_event_callback(passport_ble_event_t event,
                                const passport_ble_result_t *result,
                                void *context)
 {
     (void)context;
-    if (s_queue == NULL) return;
+    if (s_queue == NULL) return false;
     app_event_t event_item = { .type = APP_EVENT_BLE };
     event_item.data.ble.event = event;
     if (result != NULL) event_item.data.ble.result = *result;
-    (void)xQueueSend(s_queue, &event_item, 0);
+    if (event == PASSPORT_BLE_PAIRING_CODE)
+        event_item.data.ble.pairing_code = passport_ble_link_pairing_code();
+    return xQueueSend(s_queue, &event_item, pdMS_TO_TICKS(20)) == pdTRUE;
 }
 
 static void marker_timeout_callback(void *context)
 {
     (void)context;
-    app_event_t event = { .type = APP_EVENT_TIMEOUT };
-    event.data.request_id = s_timeout_request_id;
-    if (s_queue != NULL) (void)xQueueSend(s_queue, &event, 0);
+    s_marker_timeout_pending = true;
 }
 
 static void update_marker_screen(void)
@@ -620,9 +673,32 @@ static void update_marker_screen(void)
 
 static void process_ble_event(const app_event_t *item)
 {
+    if (item->data.ble.event == PASSPORT_BLE_PAIRING_CODE) {
+        (void)passport_display_policy_activity(&s_display_policy, esp_timer_get_time());
+        bsp_display_backlight(100);
+        if (bsp_lvgl_lock(500)) {
+            draw_pairing_code(item->data.ble.pairing_code);
+            bsp_lvgl_unlock();
+        }
+        return;
+    }
     if (item->data.ble.event == PASSPORT_BLE_SETTINGS) {
         (void)passport_display_policy_set_timeout(&s_display_policy,
                 passport_trip_store_screen_timeout(), esp_timer_get_time());
+        return;
+    }
+    if (item->data.ble.event == PASSPORT_BLE_TIME) {
+        const passport_ble_result_t *time_result = &item->data.ble.result;
+        s_local_utc_offset_minutes = time_result->utc_offset_minutes;
+        const struct timeval tv = {
+            .tv_sec = (time_t)time_result->timestamp_utc,
+            .tv_usec = 0,
+        };
+        (void)settimeofday(&tv, NULL);
+        if (bsp_lvgl_lock(500)) {
+            refresh_header(NULL);
+            bsp_lvgl_unlock();
+        }
         return;
     }
     if (item->data.ble.event == PASSPORT_BLE_SNAPSHOT) {
@@ -637,6 +713,7 @@ static void process_ble_event(const app_event_t *item)
         return;
     }
     if (item->data.ble.event == PASSPORT_BLE_CONNECTED) {
+        dismiss_pairing_screen();
         s_ble_connected = true;
         if (s_marker_state == MARKER_FAILURE) {
             s_marker_state = MARKER_IDLE;
@@ -646,9 +723,11 @@ static void process_ble_event(const app_event_t *item)
         return;
     }
     if (item->data.ble.event == PASSPORT_BLE_DISCONNECTED) {
+        dismiss_pairing_screen();
         s_ble_connected = false;
         if (s_marker_state == MARKER_WAITING) {
             (void)esp_timer_stop(s_marker_timeout);
+            s_marker_timeout_pending = false;
             s_marker_state = MARKER_FAILURE;
             s_marker_note = "手机已断开连接";
         }
@@ -656,13 +735,26 @@ static void process_ble_event(const app_event_t *item)
         return;
     }
     if (item->data.ble.event == PASSPORT_BLE_FAILED) {
+        dismiss_pairing_screen();
         s_ble_connected = false;
         if (s_marker_state == MARKER_WAITING) {
             (void)esp_timer_stop(s_marker_timeout);
+            s_marker_timeout_pending = false;
         }
         s_marker_state = MARKER_FAILURE;
         s_marker_note = "蓝牙连接失败";
         update_marker_screen();
+        return;
+    }
+    if (item->data.ble.event == PASSPORT_BLE_REQUEST_FAILED) {
+        if (s_marker_state == MARKER_WAITING) {
+            (void)esp_timer_stop(s_marker_timeout);
+            s_marker_timeout_pending = false;
+            s_marker_state = MARKER_FAILURE;
+            s_marker_note = "请求未送达手机";
+            play_sound(SOUND_ERROR);
+            update_marker_screen();
+        }
         return;
     }
 
@@ -670,6 +762,7 @@ static void process_ble_event(const app_event_t *item)
     if (s_marker_state != MARKER_WAITING ||
         result->request_id != s_active_request_id) return;
     (void)esp_timer_stop(s_marker_timeout);
+    s_marker_timeout_pending = false;
     if (!result->success) {
         s_marker_state = MARKER_FAILURE;
         s_marker_note = "手机未能保存定位";
@@ -724,9 +817,11 @@ static void start_marker_request(void)
     }
     if (s_marker_state == MARKER_WAITING) return;
     (void)esp_timer_stop(s_marker_timeout);
+    s_marker_timeout_pending = false;
     uint16_t request_id = s_next_request_id++;
     if (request_id == 0) request_id = s_next_request_id++;
     s_active_request_id = request_id;
+    ESP_LOGI(TAG, "starting track request id=%u", (unsigned)request_id);
     const esp_err_t err = passport_ble_link_request_location(request_id);
     if (err != ESP_OK) {
         s_marker_state = MARKER_FAILURE;
@@ -769,9 +864,12 @@ static void start_destination_request(const passport_trip_destination_t *destina
     }
     if (s_marker_state == MARKER_WAITING) return;
     (void)esp_timer_stop(s_marker_timeout);
+    s_marker_timeout_pending = false;
     uint16_t request_id = s_next_request_id++;
     if (request_id == 0) request_id = s_next_request_id++;
     s_active_request_id = request_id;
+    ESP_LOGI(TAG, "starting checklist request id=%u opcode=%s destination=%s",
+             (unsigned)request_id, undo ? "uncheck" : "check", destination->id);
     const esp_err_t err = undo
         ? passport_ble_link_request_uncheckin(request_id, destination->id, destination->name)
         : passport_ble_link_request_checkin(request_id, destination->id, destination->name);
@@ -894,6 +992,10 @@ static void process_input(const app_event_t *ev)
     }
 
     if (key == PASSPORT_INPUT_OK_LONG) {
+        if (s_marker_state == MARKER_WAITING) {
+            (void)esp_timer_stop(s_marker_timeout);
+            s_marker_timeout_pending = false;
+        }
         const passport_screen_t target = s_app.screen == PASSPORT_SCREEN_MARKER
             ? s_return_screen : (s_app.screen == PASSPORT_SCREEN_QR && s_qr_opened_from_list
                 ? PASSPORT_SCREEN_QR_LIST : PASSPORT_SCREEN_HOME);
@@ -979,6 +1081,12 @@ static void input_task(void *arg)
     app_event_t ev;
     for (;;) {
         if (xQueueReceive(s_queue, &ev, pdMS_TO_TICKS(250)) == pdTRUE) process_input(&ev);
+        if (s_marker_timeout_pending) {
+            s_marker_timeout_pending = false;
+            app_event_t timeout = { .type = APP_EVENT_TIMEOUT };
+            timeout.data.request_id = s_timeout_request_id;
+            process_input(&timeout);
+        }
         if (passport_display_policy_tick(&s_display_policy, esp_timer_get_time()))
             bsp_display_backlight(0);
     }
@@ -1002,6 +1110,7 @@ void app_main(void)
                  BSP_LCD_MOSI, BSP_LCD_SCLK, BSP_LCD_CS, BSP_LCD_DC, BSP_LCD_BL);
         return;
     }
+    log_memory("display-ready");
     app_fonts_init();
     bsp_display_backlight(100);
     s_battery_ready = bsp_battery_init() == ESP_OK;
@@ -1012,6 +1121,7 @@ void app_main(void)
     const esp_err_t trip_err = passport_trip_store_init(&s_trip);
     if (trip_err != ESP_OK)
         ESP_LOGW(TAG, "Starting with RAM itinerary only: %s", esp_err_to_name(trip_err));
+    log_memory("storage-ready");
     passport_display_policy_init(&s_display_policy, esp_timer_get_time(),
                                  passport_trip_store_screen_timeout());
     passport_ble_link_bind_trip_model(&s_trip);
@@ -1048,6 +1158,7 @@ void app_main(void)
         s_marker_state = MARKER_FAILURE;
         ESP_LOGE(TAG, "BLE location link failed to start");
     }
+    log_memory("ble-started");
     if (bsp_lvgl_lock(1000)) {
         draw_home();
         bsp_lvgl_unlock();

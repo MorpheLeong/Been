@@ -4,6 +4,7 @@ idf_component_register(
          "passport_ble_link.c"
          "passport_location_model.c"
          "passport_location_protocol.c"
+         "passport_data_nvs.c"
          "passport_store.c"
          "passport_trip_model.c"
          "passport_trip_store.c"

@@ -7,8 +7,6 @@
 #define SNAPSHOT_COMMIT 0x12U
 #define PASSPORT_TRIP_PROTOCOL_VERSION 3U
 
-static passport_trip_model_t s_staging;
-
 static uint16_t u16(const uint8_t *p)
 {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
@@ -146,13 +144,13 @@ static bool parse_snapshot(const uint8_t *data, size_t length,
                            passport_trip_model_t *out)
 {
     size_t offset = 0;
-    passport_trip_model_init(&s_staging);
+    passport_trip_model_init(out);
     if (length < 2) return false;
     const uint8_t destination_count = data[offset++];
     if (destination_count > PASSPORT_TRIP_DESTINATION_CAPACITY) return false;
-    s_staging.destination_count = destination_count;
+    out->destination_count = destination_count;
     for (size_t i = 0; i < destination_count; ++i) {
-        passport_trip_destination_t *d = &s_staging.destinations[i];
+        passport_trip_destination_t *d = &out->destinations[i];
         if (!read_string(data, length, &offset, d->id, sizeof(d->id), false) ||
             !read_string(data, length, &offset, d->name, sizeof(d->name), false) ||
             offset >= length || data[offset] > 1) return false;
@@ -161,9 +159,9 @@ static bool parse_snapshot(const uint8_t *data, size_t length,
     if (offset >= length) return false;
     const uint8_t qr_count = data[offset++];
     if (qr_count > PASSPORT_TRIP_QR_CAPACITY) return false;
-    s_staging.qr_count = qr_count;
+    out->qr_count = qr_count;
     for (size_t i = 0; i < qr_count; ++i) {
-        passport_trip_qr_t *q = &s_staging.qrs[i];
+        passport_trip_qr_t *q = &out->qrs[i];
         if (!read_string(data, length, &offset, q->id, sizeof(q->id), false) ||
             !read_string(data, length, &offset, q->name, sizeof(q->name), false) ||
             !read_string(data, length, &offset, q->payload, sizeof(q->payload), false) ||
@@ -172,22 +170,20 @@ static bool parse_snapshot(const uint8_t *data, size_t length,
         if (!read_string(data, length, &offset, q->destination_id,
                          sizeof(q->destination_id), true)) return false;
     }
-    if (!read_string(data, length, &offset, s_staging.profile.nickname,
-                     sizeof(s_staging.profile.nickname), true) ||
-        !read_string(data, length, &offset, s_staging.profile.bio,
-                     sizeof(s_staging.profile.bio), true) || offset >= length)
+    if (!read_string(data, length, &offset, out->profile.nickname,
+                     sizeof(out->profile.nickname), true) ||
+        !read_string(data, length, &offset, out->profile.bio,
+                     sizeof(out->profile.bio), true) || offset >= length)
         return false;
-    s_staging.profile.social_count = data[offset++];
-    if (s_staging.profile.social_count > PASSPORT_PROFILE_SOCIAL_CAPACITY) return false;
-    for (size_t i = 0; i < s_staging.profile.social_count; ++i) {
-        if (!read_string(data, length, &offset, s_staging.profile.social_ids[i],
-                         sizeof(s_staging.profile.social_ids[i]), false)) return false;
+    out->profile.social_count = data[offset++];
+    if (out->profile.social_count > PASSPORT_PROFILE_SOCIAL_CAPACITY) return false;
+    for (size_t i = 0; i < out->profile.social_count; ++i) {
+        if (!read_string(data, length, &offset, out->profile.social_ids[i],
+                         sizeof(out->profile.social_ids[i]), false)) return false;
     }
     if (offset >= length || data[offset] > 100) return false;
-    s_staging.profile.volume_percent = data[offset++];
-    if (offset != length || !passport_trip_model_valid(&s_staging)) return false;
-    *out = s_staging;
-    return true;
+    out->profile.volume_percent = data[offset++];
+    return offset == length && passport_trip_model_valid(out);
 }
 
 bool passport_trip_sync_frame(passport_trip_rx_t *rx,
@@ -217,7 +213,7 @@ bool passport_trip_sync_frame(passport_trip_rx_t *rx,
             return false;
         }
         memcpy(rx->payload + offset, frame + 6, bytes);
-        rx->received += bytes;
+        rx->received = (uint16_t)(rx->received + bytes);
         return true;
     }
     if (frame[1] != SNAPSHOT_COMMIT || length != 4 ||
@@ -225,12 +221,11 @@ bool passport_trip_sync_frame(passport_trip_rx_t *rx,
         rx->active = false;
         return false;
     }
-    if (!parse_snapshot(rx->payload, rx->length, &s_staging)) {
+    if (!parse_snapshot(rx->payload, rx->length, model)) {
         rx->active = false;
         return false;
     }
-    s_staging.revision = rx->revision;
-    *model = s_staging;
+    model->revision = rx->revision;
     rx->active = false;
     return true;
 }

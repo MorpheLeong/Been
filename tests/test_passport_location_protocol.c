@@ -62,11 +62,27 @@ static void test_failure_result_decoding(void)
     assert(!passport_location_protocol_decode_result(frame, sizeof(frame) - 1, &result));
 }
 
+static void test_time_sync_decoding(void)
+{
+    uint8_t frame[PASSPORT_TIME_SYNC_SIZE] = { 3, PASSPORT_TIME_SYNC_OPCODE };
+    put_u32_le(&frame[2], 1790985600);
+    put_u16_le(&frame[6], (uint16_t)(int16_t)-420);
+    int64_t timestamp = 0;
+    int16_t offset = 0;
+    assert(passport_time_sync_decode(frame, sizeof(frame), &timestamp, &offset));
+    assert(timestamp == 1790985600 && offset == -420);
+    assert(!passport_time_sync_decode(frame, sizeof(frame) - 1, &timestamp, &offset));
+    frame[6] = 0x49;
+    frame[7] = 0x03;
+    assert(!passport_time_sync_decode(frame, sizeof(frame), &timestamp, &offset));
+}
+
 int main(void)
 {
     test_request_encoding();
     test_successful_result_decoding();
     test_rejects_malformed_and_out_of_range_results();
     test_failure_result_decoding();
+    test_time_sync_decoding();
     return 0;
 }

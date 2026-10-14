@@ -4,9 +4,8 @@
 
 # Firmware Layout
 
-This repository is a minimal base for user-defined firmware targeting an
-ESP32-C3 with 8 MB Flash. Its default does not reserve product-specific
-identity, OTA, or unused data partitions.
+This repository targets an ESP32-C3 with 8 MB Flash. The product layout keeps
+Bluetooth/system keys separate from the larger application snapshots.
 
 ## Default layout
 
@@ -14,12 +13,14 @@ The default partition table contains exactly:
 
 | Partition | Type/subtype | Offset | Size | Purpose |
 | --- | --- | ---: | ---: | --- |
-| `nvs` | data/NVS | `0x9000` | `0x6000` | ESP-IDF and application key-value storage |
+| `nvs` | data/NVS | `0x9000` | `0x6000` | ESP-IDF, PHY, and Bluetooth bond keys |
 | `phy_init` | data/PHY | `0xF000` | `0x1000` | PHY initialization data |
-| `factory` | app/factory | `0x10000` | `0x7F0000` | The single application image; all remaining Flash |
+| `factory` | app/factory | `0x10000` | `0x770000` | The single application image |
+| `app_data` | data/NVS | `0x780000` | `0x80000` | Location, itinerary, profile, and display settings |
 
-The default has no OTA slots. This is a starting point, not a restriction on
-user firmware.
+The default has no OTA slots. On the first boot after upgrading from the older
+three-partition layout, validated application records are copied into
+`app_data` before their old namespaces are reclaimed from `nvs`.
 
 ## Custom layouts
 
