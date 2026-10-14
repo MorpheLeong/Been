@@ -16,6 +16,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,7 +37,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Checklist
@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Route
@@ -266,7 +265,7 @@ private fun PassportApp(
                         Column {
                             Text(tab.title, fontWeight = FontWeight.SemiBold)
                             Text(
-                                bleState,
+                                if (bleConnected) "设备已连接" else bleState,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -327,9 +326,11 @@ private fun PassportApp(
         refresh(); importing = false
     }
     editingTrack?.let { track ->
-        TrackEditorDialog(track, onDismiss = { editingTrack = null }) { name, lat, lon ->
-            db.updateTrack(track.id, name, lat, lon); refresh(); editingTrack = null
-        }
+        TrackEditorDialog(
+            track,
+            onDismiss = { editingTrack = null },
+            onDelete = { db.deleteTrack(track.id); refresh(); editingTrack = null },
+        ) { name, lat, lon -> db.updateTrack(track.id, name, lat, lon); refresh(); editingTrack = null }
     }
 }
 
@@ -429,21 +430,11 @@ private fun ProfileSettingsPage(
 @Composable
 private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(top = 16.dp)) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(24.dp)) {
-            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("用 Passport 短按确认键记录此刻", style = MaterialTheme.typography.titleMedium)
-                Text("手机定位成功并保存后，才会向设备确认。定位失败时清单不会推进。", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
         Text("最近记录", style = MaterialTheme.typography.titleMedium)
         if (rows.isEmpty()) Text("还没有轨迹记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(rows, key = { it.id }) { row -> Card { Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(row.name, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { edit(row) }) { Text("编辑位置") }
-                }
+            items(rows, key = { it.id }) { row -> Card(modifier = Modifier.fillMaxWidth().clickable { edit(row) }) { Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                Text(row.name, fontWeight = FontWeight.Medium)
                 Text("${DateFormat.getDateTimeInstance().format(Date(row.time))} · ${row.lat}, ${row.lon}", style = MaterialTheme.typography.bodySmall)
             } } }
         }
@@ -455,27 +446,23 @@ private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
 private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refresh: () -> Unit, import: () -> Unit) {
     val context = LocalContext.current
     var adding by remember { mutableStateOf(false) }
+    var editingDestination by remember { mutableStateOf<Destination?>(null) }
     var dragDistance by remember { mutableFloatStateOf(0f) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(top = 12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { adding = true }) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("添加")
-            }
-            OutlinedButton(onClick = import) { Text("导入") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { adding = true }, modifier = Modifier.weight(1f)) { Text("添加") }
+            OutlinedButton(onClick = import, modifier = Modifier.weight(1f)) { Text("导入") }
         }
         Text("长按卡片并拖动排序", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             itemsIndexed(destinations, key = { _, item -> item.id }) { index, destination ->
-                var menuOpen by remember(destination.id) { mutableStateOf(false) }
                 val containerColor = if (destination.done) MaterialTheme.colorScheme.surfaceContainerLow
                     else MaterialTheme.colorScheme.secondaryContainer
                 val contentColor = if (destination.done) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.onSecondaryContainer
                 Card(
                     colors = CardDefaults.cardColors(containerColor = containerColor, contentColor = contentColor),
-                    modifier = Modifier.fillMaxWidth().pointerInput(destination.id, destinations) {
+                    modifier = Modifier.fillMaxWidth().clickable { editingDestination = destination }.pointerInput(destination.id, destinations) {
                     detectDragGesturesAfterLongPress(onDragEnd = { dragDistance = 0f }) { change, amount ->
                         change.consume(); dragDistance += amount.y
                         val steps = (dragDistance / 84f).toInt()
@@ -505,18 +492,6 @@ private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refre
                             Icon(Icons.Default.Link, contentDescription = "已绑定二维码", tint = contentColor)
                         }
                         Icon(Icons.Default.DragHandle, contentDescription = "长按拖动排序", tint = contentColor.copy(alpha = 0.65f))
-                        Box {
-                            IconButton(onClick = { menuOpen = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "更多操作", tint = contentColor)
-                            }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("删除") },
-                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                                    onClick = { menuOpen = false; db.deleteDestination(destination.id); refresh() },
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -526,6 +501,14 @@ private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refre
         runCatching { db.addDestination(name) }
             .onSuccess { refresh(); adding = false }
             .onFailure { Toast.makeText(context, it.message ?: "添加失败", Toast.LENGTH_LONG).show() }
+    }
+    editingDestination?.let { destination ->
+        DestinationDialog(
+            destination = destination,
+            onDismiss = { editingDestination = null },
+            onDelete = { db.deleteDestination(destination.id); refresh(); editingDestination = null },
+            onSave = { name -> db.updateDestination(destination.id, name); refresh(); editingDestination = null },
+        )
     }
 }
 
@@ -589,12 +572,22 @@ private fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 @Composable
-private fun DestinationDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("添加地点") },
+private fun DestinationDialog(
+    destination: Destination? = null,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
+    onSave: (String) -> Unit,
+) {
+    var text by remember(destination?.id) { mutableStateOf(destination?.name.orEmpty()) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (destination == null) "添加地点" else "编辑地点") },
         text = { OutlinedTextField(text, { text = it }, label = { Text("目的地") }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onDelete != null) TextButton(onClick = onDelete) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = onDismiss) { Text("取消") }
+                TextButton(onClick = { onSave(text) }) { Text("保存") }
+            }
+        })
 }
 @Composable
 private fun QrEditorDialog(
@@ -648,7 +641,12 @@ private fun QrEditorDialog(
 }
 
 @Composable
-private fun TrackEditorDialog(track: TrackPoint, onDismiss: () -> Unit, onSave: (String, Double, Double) -> Unit) {
+private fun TrackEditorDialog(
+    track: TrackPoint,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+    onSave: (String, Double, Double) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var name by remember(track.id) { mutableStateOf(track.name) }
@@ -693,11 +691,16 @@ private fun TrackEditorDialog(track: TrackPoint, onDismiss: () -> Unit, onSave: 
             }
             Text("搜索结果由 Android 系统 Geocoder 提供；也可以直接输入地图上选定的坐标。", style = MaterialTheme.typography.bodySmall)
         } },
-        confirmButton = { TextButton(onClick = {
-            val lat = latitude.toDoubleOrNull(); val lon = longitude.toDoubleOrNull()
-            if (name.isBlank() || lat == null || lon == null || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
-                message = "请输入有效的位置名称和经纬度"
-            } else onSave(name, lat, lon)
-        }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onDelete) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = onDismiss) { Text("取消") }
+                TextButton(onClick = {
+                    val lat = latitude.toDoubleOrNull(); val lon = longitude.toDoubleOrNull()
+                    if (name.isBlank() || lat == null || lon == null || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
+                        message = "请输入有效的位置名称和经纬度"
+                    } else onSave(name, lat, lon)
+                }) { Text("保存") }
+            }
+        })
 }

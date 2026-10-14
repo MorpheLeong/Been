@@ -35,6 +35,7 @@
 #define C_DIM 0x72917F
 #define C_WHITE 0xD9F7E5
 #define C_AMBER 0xFFD166
+#define C_RED 0xFF6B6B
 
 LV_FONT_DECLARE(lv_font_source_han_sans_sc_16_cjk);
 LV_FONT_DECLARE(lv_font_source_han_sans_sc_14_cjk);
@@ -77,8 +78,7 @@ static lv_obj_t *s_marker_card;
 static lv_obj_t *s_clock_text;
 static lv_obj_t *s_battery_text;
 static lv_obj_t *s_battery_fill;
-static lv_obj_t *s_phone_icon;
-static lv_obj_t *s_phone_dot;
+static lv_obj_t *s_connection_dots[4];
 static lv_timer_t *s_clock_timer;
 static size_t s_history_page;
 static size_t s_trip_page;
@@ -213,13 +213,15 @@ static void refresh_header(lv_timer_t *timer)
     if (s_clock_text == NULL) return;
     const time_t now = time(NULL);
     if (now < 1577836800) {
-        lv_label_set_text(s_clock_text, "--:--:--");
+        lv_label_set_text(s_clock_text, "--:--");
     } else {
         const time_t local_now = now + (time_t)s_local_utc_offset_minutes * 60;
         struct tm local_time;
         if (gmtime_r(&local_now, &local_time) != NULL) {
-            char clock[16];
-            (void)snprintf(clock, sizeof(clock), "%02d:%02d:%02d", local_time.tm_hour, local_time.tm_min, local_time.tm_sec);
+            static const char *const weekdays[] = { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
+            char clock[20];
+            (void)snprintf(clock, sizeof(clock), "%s %02d:%02d", weekdays[local_time.tm_wday],
+                           local_time.tm_hour, local_time.tm_min);
             lv_label_set_text(s_clock_text, clock);
         }
     }
@@ -240,11 +242,10 @@ static void refresh_header(lv_timer_t *timer)
             }
         }
     }
-    if (s_phone_icon != NULL) {
-        lv_obj_set_style_border_color(s_phone_icon,
-            lv_color_hex(s_ble_connected ? C_GREEN : C_DIM), 0);
-        lv_obj_set_style_bg_color(s_phone_dot,
-            lv_color_hex(s_ble_connected ? C_GREEN : C_AMBER), 0);
+    for (size_t i = 0; i < sizeof(s_connection_dots) / sizeof(s_connection_dots[0]); ++i) {
+        if (s_connection_dots[i] != NULL)
+            lv_obj_set_style_bg_color(s_connection_dots[i],
+                                      lv_color_hex(s_ble_connected ? C_GREEN : C_RED), 0);
     }
 }
 
@@ -317,8 +318,7 @@ static void base_screen(const char *title)
     s_clock_text = NULL;
     s_battery_text = NULL;
     s_battery_fill = NULL;
-    s_phone_icon = NULL;
-    s_phone_dot = NULL;
+    memset(s_connection_dots, 0, sizeof(s_connection_dots));
     if (s_screen == NULL) s_screen = lv_obj_create(NULL);
     else lv_obj_clean(s_screen);
     memset(s_home_items, 0, sizeof(s_home_items));
@@ -328,18 +328,27 @@ static void base_screen(const char *title)
     lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *bar = panel(s_screen, 8, 8, 224, 28);
-    s_clock_text = label(bar, "--:--:--", 8, 5, 98, 18, C_GREEN, &lv_font_montserrat_14);
-    panel(bar, 116, 8, 20, 11);
-    panel(bar, 136, 11, 2, 5);
-    s_battery_fill = panel(bar, 119, 11, 14, 5);
+    s_clock_text = label(bar, "--:--", 8, 5, 118, 18, C_GREEN, &lv_font_montserrat_14);
+    panel(bar, 142, 8, 20, 11);
+    panel(bar, 162, 11, 2, 5);
+    s_battery_fill = panel(bar, 145, 11, 14, 5);
     lv_obj_set_style_border_width(s_battery_fill, 0, 0);
     lv_obj_set_style_bg_color(s_battery_fill, lv_color_hex(C_GREEN), 0);
-    s_battery_text = label(bar, "--%", 144, 5, 48, 18, C_DIM, &lv_font_montserrat_14);
-    s_phone_icon = panel(bar, 199, 5, 12, 18);
-    lv_obj_set_style_radius(s_phone_icon, 2, 0);
-    s_phone_dot = panel(bar, 215, 11, 6, 6);
-    lv_obj_set_style_border_width(s_phone_dot, 0, 0);
-    lv_obj_set_style_radius(s_phone_dot, LV_RADIUS_CIRCLE, 0);
+    s_battery_text = label(bar, "--%", 170, 5, 46, 18, C_DIM, &lv_font_montserrat_14);
+    lv_obj_set_style_text_align(s_battery_text, LV_TEXT_ALIGN_RIGHT, 0);
+    /* The display mask reserves exact physical-corner cutouts for these link dots. */
+    static const int corner_x[] = { 0, BSP_LCD_W - BSP_LVGL_CORNER_ACCENT_DIAMETER,
+                                    0, BSP_LCD_W - BSP_LVGL_CORNER_ACCENT_DIAMETER };
+    static const int corner_y[] = { 0, 0,
+                                    BSP_LCD_H - BSP_LVGL_CORNER_ACCENT_DIAMETER,
+                                    BSP_LCD_H - BSP_LVGL_CORNER_ACCENT_DIAMETER };
+    for (size_t i = 0; i < sizeof(s_connection_dots) / sizeof(s_connection_dots[0]); ++i) {
+        s_connection_dots[i] = panel(s_screen, corner_x[i], corner_y[i],
+                                     BSP_LVGL_CORNER_ACCENT_DIAMETER,
+                                     BSP_LVGL_CORNER_ACCENT_DIAMETER);
+        lv_obj_set_style_border_width(s_connection_dots[i], 0, 0);
+        lv_obj_set_style_radius(s_connection_dots[i], LV_RADIUS_CIRCLE, 0);
+    }
     refresh_header(NULL);
 
     lv_obj_t *foot = panel(s_screen, 8, 282, 224, 28);

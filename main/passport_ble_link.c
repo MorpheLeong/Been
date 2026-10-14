@@ -14,6 +14,7 @@
 #include "host/ble_store.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
+#include "nimble/nimble_npl.h"
 #include "nimble/nimble_port.h"
 #include "esp_heap_caps.h"
 #include "os/os_mbuf.h"
@@ -60,6 +61,10 @@ typedef struct {
 } passport_request_tx_t;
 
 static passport_request_tx_t s_request_tx;
+static struct ble_npl_callout s_request_tx_callout;
+static bool s_request_tx_callout_ready;
+
+static esp_err_t send_next_request_frame(void);
 
 static bool notify_app(passport_ble_event_t event,
                        const passport_ble_result_t *result)
@@ -69,10 +74,27 @@ static bool notify_app(passport_ble_event_t event,
 
 static void clear_request_tx(void)
 {
+    if (s_request_tx_callout_ready) ble_npl_callout_stop(&s_request_tx_callout);
     memset(&s_request_tx, 0, sizeof(s_request_tx));
 }
 
-static esp_err_t send_next_request_frame(void);
+static void request_tx_callout_cb(struct ble_npl_event *event)
+{
+    (void)event;
+    if (!s_request_tx.active || s_request_tx.waiting_tx) return;
+    if (send_next_request_frame() != ESP_OK) {
+        clear_request_tx();
+        notify_app(PASSPORT_BLE_REQUEST_FAILED, NULL);
+    }
+}
+
+static bool schedule_request_tx(void)
+{
+    if (!s_request_tx_callout_ready) return false;
+    ble_npl_time_t delay = ble_npl_time_ms_to_ticks32(1);
+    if (delay == 0) delay = 1;
+    return ble_npl_callout_reset(&s_request_tx_callout, delay) == BLE_NPL_OK;
+}
 
 static void log_memory(const char *stage)
 {
@@ -295,7 +317,8 @@ static int gap_event(struct ble_gap_event *event, void *arg)
             (s_request_tx.opcode != PASSPORT_LOCATION_REQUEST_OPCODE &&
              s_request_tx.offset >= s_request_tx.payload_length)) {
             clear_request_tx();
-        } else if (send_next_request_frame() != ESP_OK) {
+        } else if (!schedule_request_tx()) {
+            ESP_LOGW(TAG, "failed to defer next request frame");
             clear_request_tx();
             notify_app(PASSPORT_BLE_REQUEST_FAILED, NULL);
         }
@@ -429,6 +452,15 @@ esp_err_t passport_ble_link_start(passport_ble_event_cb_t callback, void *contex
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         return err;
     }
+    int callout_rc = ble_npl_callout_init(&s_request_tx_callout,
+                                           nimble_port_get_dflt_eventq(),
+                                           request_tx_callout_cb, NULL);
+    if (callout_rc != BLE_NPL_OK) {
+        ESP_LOGE(TAG, "request TX callout init failed: %d", callout_rc);
+        err = ESP_FAIL;
+        goto failed;
+    }
+    s_request_tx_callout_ready = true;
     log_memory("nimble-ready");
     s_started = true;
     ble_svc_gap_init();
@@ -459,6 +491,11 @@ esp_err_t passport_ble_link_start(passport_ble_event_cb_t callback, void *contex
 
 failed:
     s_start_requested = false;
+    if (s_request_tx_callout_ready) {
+        ble_npl_callout_stop(&s_request_tx_callout);
+        ble_npl_callout_deinit(&s_request_tx_callout);
+        s_request_tx_callout_ready = false;
+    }
     (void)nimble_port_deinit();
     s_started = false;
     return err;

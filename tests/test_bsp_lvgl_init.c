@@ -81,6 +81,7 @@ int main(void) {
     lv_area_t area = { .x1 = 0, .y1 = 0, .x2 = BSP_LCD_W - 1, .y2 = 0 };
     lv_event_t ev = { .target = &display, .area = &area };
     rounded_flush_event(&ev);
-    assert(pixels[0] == 0 && pixels[BSP_LCD_W - 1] == 0 && pixels[BSP_LCD_W / 2] == 0xffff);
+    assert(pixels[0] == 0 && pixels[3] == 0xffff && pixels[BSP_LCD_W - 1] == 0 &&
+           pixels[BSP_LCD_W / 2] == 0xffff);
     puts("BSP LVGL initialization tests: PASS");
 }

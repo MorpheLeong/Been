@@ -33,21 +33,25 @@ static void rounded_flush_event(lv_event_t *event)
                                      (y - area->y1) * draw_buf->header.stride);
         int32_t visible_x1;
         int32_t visible_x2;
-        if (!bsp_display_rounded_row_span(y, BSP_LCD_W, BSP_LCD_H,
-                                          BSP_LVGL_SCREEN_RADIUS, &visible_x1,
-                                          &visible_x2)) {
-            memset(row, 0, (size_t)width * sizeof(uint16_t));
-            continue;
-        }
+        const bool has_visible_span = bsp_display_rounded_row_span(
+            y, BSP_LCD_W, BSP_LCD_H, BSP_LVGL_SCREEN_RADIUS, &visible_x1, &visible_x2);
         // Only clear pixels outside the visible span. The port swaps RGB565
         // bytes after this event; black is 0 in either byte order.
-        const int32_t clear_left_end = visible_x1 > area->x2 ? area->x2 : visible_x1 - 1;
-        const int32_t clear_right_start = visible_x2 < area->x1 ? area->x1 : visible_x2 + 1;
+        const int32_t clear_left_end = !has_visible_span || visible_x1 > area->x2
+            ? area->x2 : visible_x1 - 1;
+        const int32_t clear_right_start = !has_visible_span || visible_x2 < area->x1
+            ? area->x1 : visible_x2 + 1;
         for (int32_t x = area->x1; x <= clear_left_end; ++x) {
-            row[x - area->x1] = 0;
+            if (!bsp_display_pixel_in_corner_accent(x, y, BSP_LCD_W, BSP_LCD_H,
+                                                    BSP_LVGL_CORNER_ACCENT_DIAMETER)) {
+                row[x - area->x1] = 0;
+            }
         }
         for (int32_t x = clear_right_start; x <= area->x2; ++x) {
-            row[x - area->x1] = 0;
+            if (!bsp_display_pixel_in_corner_accent(x, y, BSP_LCD_W, BSP_LCD_H,
+                                                    BSP_LVGL_CORNER_ACCENT_DIAMETER)) {
+                row[x - area->x1] = 0;
+            }
         }
     }
 
@@ -119,7 +123,8 @@ lv_display_t *bsp_lvgl_init(void) {
     s_disp = disp;
     lvgl_port_unlock();
 
-    ESP_LOGI(TAG, "LVGL 就绪，全局圆角=%d，外部填充=黑色", BSP_LVGL_SCREEN_RADIUS);
+    ESP_LOGI(TAG, "LVGL 就绪，全局圆角=%d，四角状态点直径=%d",
+             BSP_LVGL_SCREEN_RADIUS, BSP_LVGL_CORNER_ACCENT_DIAMETER);
     return s_disp;
 }
 

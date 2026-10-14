@@ -7,8 +7,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// The final LVGL frame is masked to this radius; pixels outside are pure black.
+// The final LVGL frame is masked to this radius; pixels outside are pure black
+// except for the documented corner-accent cutouts below.
 #define BSP_LVGL_SCREEN_RADIUS 30
+
+// Four circular corner accents are deliberately allowed through the final-frame
+// mask. Product UI uses these physical-corner pixels for link status only.
+#define BSP_LVGL_CORNER_ACCENT_DIAMETER 6
 
 // 初始化 SPI 总线、面板、厂商寄存器、背光 LEDC。成功调用可重复；失败会回滚本次
 // 已创建的显示资源，修正故障后可重试。成功后屏幕已上电但内容未定。

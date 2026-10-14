@@ -39,6 +39,16 @@ int main(void)
     assert(!bsp_display_pixel_outside_rounded_rect(0, 0, width, height, 0));
     assert(bsp_display_pixel_outside_rounded_rect(-1, 0, width, height, radius));
 
+    // Product link-status accents deliberately occupy each physical corner,
+    // while nearby pixels remain subject to the regular rounded-frame mask.
+    assert(bsp_display_pixel_in_corner_accent(3, 3, width, height, 6));
+    assert(bsp_display_pixel_in_corner_accent(236, 3, width, height, 6));
+    assert(bsp_display_pixel_in_corner_accent(3, 316, width, height, 6));
+    assert(bsp_display_pixel_in_corner_accent(236, 316, width, height, 6));
+    assert(!bsp_display_pixel_in_corner_accent(9, 3, width, height, 6));
+    assert(!bsp_display_pixel_in_corner_accent(3, 9, width, height, 6));
+    assert(!bsp_display_pixel_in_corner_accent(-1, 3, width, height, 6));
+
     // The optimized row-span path must be pixel-for-pixel equivalent at both
     // corners, the radius transition, and for clamped/degenerate radii.
     assert_span_matches_pixels(width, height, radius);

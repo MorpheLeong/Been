@@ -80,6 +80,7 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
         writableDatabase.execSQL("UPDATE tracks SET name=?,lat=?,lon=? WHERE id=?",
             arrayOf(name.trim().take(100), lat, lon, id))
     }
+    @Synchronized fun deleteTrack(id: Long) { writableDatabase.delete("tracks", "id=?", arrayOf(id.toString())) }
     @Synchronized fun saveTrackOnce(requestId: String, destinationId: String?, name: String, lat: Double, lon: Double, time: Long, accuracy: Float): Boolean {
         val values = ContentValues().apply {
             put("request_id", requestId); put("destination_id", destinationId); put("name", name)
@@ -94,6 +95,11 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
         writableDatabase.insert("destinations", null, values)
     }
     @Synchronized fun deleteDestination(id: String) { writableDatabase.delete("destinations", "id=?", arrayOf(id)); normalizeOrder() }
+    @Synchronized fun updateDestination(id: String, name: String) {
+        val clean = truncateUtf8(name.trim(), 47)
+        require(clean.isNotEmpty())
+        writableDatabase.execSQL("UPDATE destinations SET name=? WHERE id=?", arrayOf(clean, id))
+    }
     @Synchronized fun reorder(from: Int, to: Int) {
         val list = destinations().toMutableList(); if (from !in list.indices || to !in list.indices || from == to) return
         val moved = list.removeAt(from); list.add(to, moved)

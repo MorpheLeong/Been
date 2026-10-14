@@ -63,3 +63,24 @@ bool bsp_display_pixel_outside_rounded_rect(int32_t x, int32_t y,
 
     return dx * dx + dy * dy > radius * radius;
 }
+
+bool bsp_display_pixel_in_corner_accent(int32_t x, int32_t y,
+                                        int32_t width, int32_t height,
+                                        int32_t diameter)
+{
+    if (x < 0 || y < 0 || x >= width || y >= height || diameter <= 0 ||
+        diameter > width || diameter > height) {
+        return false;
+    }
+
+    const int32_t radius = diameter / 2;
+    const int32_t left_center = radius;
+    const int32_t right_center = width - 1 - radius;
+    const int32_t top_center = radius;
+    const int32_t bottom_center = height - 1 - radius;
+    const int32_t center_x = x < width / 2 ? left_center : right_center;
+    const int32_t center_y = y < height / 2 ? top_center : bottom_center;
+    const int32_t dx = x - center_x;
+    const int32_t dy = y - center_y;
+    return dx * dx + dy * dy <= radius * radius;
+}
