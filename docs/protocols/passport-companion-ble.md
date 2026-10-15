@@ -29,7 +29,7 @@ On first use, the app opens Android system Bluetooth settings and lets the syste
 
 ### Track capture
 
-Four bytes: version 0x03, opcode 0x01, request ID uint16. The app obtains the current location and persists it locally with the localized track label. It sends success only after persistence; otherwise it sends a failure result.
+Four bytes: version 0x03, opcode 0x01, request ID uint16. The app obtains the current location and persists it locally with the localized track label. It sends success only after persistence; otherwise it sends a failure result. The app database retains every track until the user deletes it manually. The Passport stores and displays only records from the current day in the phone's current time zone; the time and offset returned by the app remove the previous day's device records, and the device applies the same cleanup when its clock crosses local midnight.
 
 ### Checklist check-in
 

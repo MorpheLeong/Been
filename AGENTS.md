@@ -94,3 +94,89 @@ and obtain approval before flashing; detection alone is not consent.
 Create commits and push only when the user requests them or the active workflow explicitly requires them. Ordinary feature, application, and documentation pull requests must not edit `docs/CHANGELOG.md` or `docs/CHANGELOG.zh_CN.md`; describe user-visible behavior, compatibility, and release-flow impact in the pull-request body and authoritative documentation instead. During release preparation, the release maintainer aggregates merged user-visible changes into both changelog files before creating the tag.
 
 Community guidance is in `.github/CONTRIBUTING.md`, `.github/CODE_OF_CONDUCT.md`, `.github/SECURITY.md`, and `.github/SUPPORT.md`.
+
+## Development Environment / Codex Workflow
+
+This checkout has a verified, machine-specific environment record. New tasks
+must use it instead of repeating SDK and toolchain discovery. Read the detailed
+record only when an environment fact or command is needed:
+[`docs/CODEX_ENV.md`](docs/CODEX_ENV.md).
+
+### Project layout
+
+- Repo and ESP-IDF root: `C:\Users\MPHNUC\Documents\ChatGPT\AI Passport\ai-passport-fork-checkout\ai-passport-main`
+- Android root/module: `android-app` / `app`
+- Shared protocol: `docs/protocols/passport-companion-ble.md`
+- Firmware implementation: `main`; Android implementation: `android-app/app/src/main`
+
+### Android environment
+
+- Android SDK: `C:\Users\MPHNUC\AppData\Local\Android\Sdk`
+- JDK: Android Studio JBR at `C:\Program Files\Android\Android Studio\jbr`
+- Entry: `. .\tools\codex-env.ps1 -Scope Android`, then use
+  `android-app\gradlew.bat`. Use the SDK adb selected by this script, not a bare
+  adb from the unprepared host `PATH`.
+- Verified gate: from `android-app`,
+  `.\gradlew.bat testDebugUnitTest lintDebug assembleDebug`.
+
+### ESP-IDF environment
+
+- `IDF_PATH`: `C:\Espressif\frameworks\esp-idf-v5.5.3`
+- Version/target: ESP-IDF v5.5.3, ESP32-C3, RISC-V.
+- Python: `C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe`
+- Entry for every new PowerShell process:
+  `. .\tools\codex-env.ps1 -Scope EspIdf`.
+- Standard build: `idf.py build`. Discover the current serial port with
+  `python -m serial.tools.list_ports -v`; never reuse a recorded COM number.
+- Flashing/monitoring still requires the normal explicit authorization. See
+  `docs/CODEX_ENV.md` for commands and image offsets.
+
+### Standard commands
+
+```powershell
+# Prepare both toolchains in the current PowerShell process
+. .\tools\codex-env.ps1
+
+# Android
+Push-Location android-app
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+Pop-Location
+
+# ESP-IDF
+idf.py --version
+idf.py build
+```
+
+### Agent startup policy
+
+- Start every new task by reading this `AGENTS.md`. Trust its recorded paths,
+  environment, and commands as current project facts.
+- Do not run broad `ls`, `find`, `where`, `Get-ChildItem`, SDK, JDK, Gradle,
+  adb, ESP-IDF, Python, CMake, Ninja, toolchain, or project-directory discovery
+  merely to reconfirm the environment.
+- A new Codex conversation is not a reason to rediscover the environment. If a
+  recorded command works, enter the relevant code and implementation directly.
+- If a recorded command fails, investigate the component named by the concrete
+  error. Do not restart discovery for unrelated toolchains; an Android failure
+  does not justify rescanning ESP-IDF, and the reverse is also true.
+- Do not treat temporary shell state as a permanent fact. Dot-source
+  `tools/codex-env.ps1` in each new PowerShell process when its environment is
+  needed.
+- After a confirmed environment change, update this section,
+  `docs/CODEX_ENV.md`, its Chinese pair, and the environment script together.
+
+### Known dead ends
+
+- An unprepared shell has no valid `JAVA_HOME`; a bare Gradle Wrapper call fails.
+- Bare `adb` resolves to Touch Portal's bundled adb, not the Android SDK adb.
+- Bare `python` resolves to WindowsApps, not the ESP-IDF virtual environment.
+- Bare `idf.py` before project activation may be unavailable or resolve to an
+  unrelated host package reporting `v1.0.3`; it is not ESP-IDF. Do not interpret
+  either result as a missing installation.
+- Direct `export.ps1` activation fails in the current non-interactive PowerShell
+  because multiple output records are dot-sourced. Use `tools/codex-env.ps1`.
+- Running activation only inside a child PowerShell does not prepare its parent;
+  dot-source the project entry in the shell that will build.
+- Do not create another ESP-IDF Python venv, use system Gradle, select Xtensa for
+  ESP32-C3, hard-code a COM port/device serial, flash an app-only image at `0x0`,
+  or erase all flash as a routine fix.

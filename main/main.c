@@ -77,7 +77,6 @@ static lv_obj_t *s_marker_state_label;
 static lv_obj_t *s_marker_card;
 static lv_obj_t *s_clock_text;
 static lv_obj_t *s_battery_text;
-static lv_obj_t *s_battery_fill;
 static lv_obj_t *s_connection_dots[4];
 static lv_timer_t *s_clock_timer;
 static size_t s_history_page;
@@ -115,17 +114,20 @@ static esp_timer_handle_t s_marker_timeout;
 static const char *s_marker_note = "请先连接手机";
 static void base_screen(const char *title);
 static void show_screen(passport_screen_t screen);
+#define QR_IMAGE_MAX_SIDE 160
+#define QR_QUIET_ZONE_MODULES 4
+
 /* The image descriptor is RGB565. lv_color_t is RGB888-sized in LVGL 9 and
- * would waste 16.9 KB while also giving the decoder the wrong pixel layout. */
-static uint16_t s_qr_pixels[130 * 130];
+ * would waste memory while also giving the decoder the wrong pixel layout. */
+static uint16_t s_qr_pixels[QR_IMAGE_MAX_SIDE * QR_IMAGE_MAX_SIDE];
 static lv_image_dsc_t s_qr_image = {
     .header = {
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = LV_COLOR_FORMAT_RGB565,
         .flags = 0,
-        .w = 130,
-        .h = 130,
-        .stride = 130 * sizeof(uint16_t),
+        .w = QR_IMAGE_MAX_SIDE,
+        .h = QR_IMAGE_MAX_SIDE,
+        .stride = QR_IMAGE_MAX_SIDE * sizeof(uint16_t),
         .reserved_2 = 0,
     },
     .data_size = sizeof(s_qr_pixels),
@@ -234,13 +236,6 @@ static void refresh_header(lv_timer_t *timer)
             if (soc >= 0) (void)snprintf(battery, sizeof(battery), "%d%%", soc);
         }
         lv_label_set_text(s_battery_text, battery);
-        if (s_battery_fill != NULL) {
-            if (soc <= 0) lv_obj_set_hidden(s_battery_fill, true);
-            else {
-                lv_obj_set_hidden(s_battery_fill, false);
-                lv_obj_set_width(s_battery_fill, (soc * 14 + 99) / 100);
-            }
-        }
     }
     for (size_t i = 0; i < sizeof(s_connection_dots) / sizeof(s_connection_dots[0]); ++i) {
         if (s_connection_dots[i] != NULL)
@@ -317,7 +312,6 @@ static void base_screen(const char *title)
     s_marker_card = NULL;
     s_clock_text = NULL;
     s_battery_text = NULL;
-    s_battery_fill = NULL;
     memset(s_connection_dots, 0, sizeof(s_connection_dots));
     if (s_screen == NULL) s_screen = lv_obj_create(NULL);
     else lv_obj_clean(s_screen);
@@ -329,11 +323,6 @@ static void base_screen(const char *title)
 
     lv_obj_t *bar = panel(s_screen, 8, 8, 224, 28);
     s_clock_text = label(bar, "--:--", 8, 5, 118, 18, C_GREEN, &lv_font_montserrat_14);
-    panel(bar, 142, 8, 20, 11);
-    panel(bar, 162, 11, 2, 5);
-    s_battery_fill = panel(bar, 145, 11, 14, 5);
-    lv_obj_set_style_border_width(s_battery_fill, 0, 0);
-    lv_obj_set_style_bg_color(s_battery_fill, lv_color_hex(C_GREEN), 0);
     s_battery_text = label(bar, "--%", 170, 5, 46, 18, C_DIM, &lv_font_montserrat_14);
     lv_obj_set_style_text_align(s_battery_text, LV_TEXT_ALIGN_RIGHT, 0);
     /* The display mask reserves exact physical-corner cutouts for these link dots. */
@@ -530,14 +519,17 @@ static void draw_checklist(void)
     int visible = 0;
     for (size_t i = start; i < s_trip.destination_count && visible < 7; ++i) {
         const passport_trip_destination_t *d = &s_trip.destinations[i];
-        char text[72];
-        /* UTF-8 圆点是多字节字符串，不能用单字节的 %c 输出。 */
-        (void)snprintf(text, sizeof(text), "%s %02u  %.48s",
-                       d->completed ? "+" : (i == s_trip_selection ? ">" : "·"),
+        const bool selected = i == s_trip_selection;
+        char text[68];
+        (void)snprintf(text, sizeof(text), "%02u  %.48s",
                        (unsigned)(i + 1), d->name);
         lv_obj_t *row = panel(s_screen, 8, 48 + visible * 30, 224, 26);
-        label(row, text, 7, 3, 210, 20,
-              d->completed ? C_DIM : (i == s_trip_selection ? C_GREEN : C_WHITE),
+        lv_obj_set_style_border_color(row, lv_color_hex(selected ? C_GREEN : C_LINE), 0);
+        lv_obj_set_style_bg_color(row, lv_color_hex(selected ? 0x183528 : C_PANEL), 0);
+        label(row, selected ? ">" : (d->completed ? "*" : "-"),
+              7, 3, 12, 20, d->completed ? C_DIM : C_WHITE,
+              &lv_font_montserrat_14);
+        label(row, text, 24, 3, 191, 20, d->completed ? C_DIM : C_WHITE,
               &lv_font_montserrat_14);
         ++visible;
     }
@@ -552,19 +544,26 @@ static void qr_render_callback(esp_qrcode_handle_t code)
 {
     const int size = esp_qrcode_get_size(code);
     if (size < 21 || size > 57) return;
-    const uint16_t white = 0xFFFFU;
-    const uint16_t black = 0x0000U;
-    for (size_t i = 0; i < 130U * 130U; ++i) s_qr_pixels[i] = white;
-    const int scale = 2;
-    const int quiet = 4;
+    const int modules = size + QR_QUIET_ZONE_MODULES * 2;
+    const int scale = QR_IMAGE_MAX_SIDE / modules;
+    if (scale < 1) return;
+    const int side = modules * scale;
+    const uint16_t background =
+        (uint16_t)((((C_BG >> 16) & 0xF8U) << 8) |
+                   (((C_BG >> 8) & 0xFCU) << 3) |
+                   ((C_BG & 0xFFU) >> 3));
+    const uint16_t foreground = 0xFFFFU;
+    const int origin = (QR_IMAGE_MAX_SIDE - side) / 2;
+    for (size_t i = 0; i < QR_IMAGE_MAX_SIDE * QR_IMAGE_MAX_SIDE; ++i)
+        s_qr_pixels[i] = background;
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
             if (!esp_qrcode_get_module(code, x, y)) continue;
-            const int left = (x + quiet) * scale;
-            const int top = (y + quiet) * scale;
+            const int left = origin + (x + QR_QUIET_ZONE_MODULES) * scale;
+            const int top = origin + (y + QR_QUIET_ZONE_MODULES) * scale;
             for (int py = 0; py < scale; ++py)
                 for (int px = 0; px < scale; ++px)
-                    s_qr_pixels[(top + py) * 130 + left + px] = black;
+                    s_qr_pixels[(top + py) * QR_IMAGE_MAX_SIDE + left + px] = foreground;
         }
     }
     s_qr_ready = true;
@@ -632,7 +631,7 @@ static void draw_qr(void)
         label(s_screen, title, 16, 48, 208, 24, C_WHITE, &lv_font_montserrat_14);
         lv_obj_t *image = lv_image_create(s_screen);
         lv_image_set_src(image, &s_qr_image);
-        lv_obj_align(image, LV_ALIGN_CENTER, 0, 24);
+        lv_obj_align(image, LV_ALIGN_TOP_MID, 0, 78);
         label(s_screen, "上下切换二维码", 24, 263, 196, 17, C_DIM, &lv_font_montserrat_14);
     }
     finish_screen();
@@ -680,6 +679,20 @@ static void update_marker_screen(void)
     }
 }
 
+static bool retain_current_history_day(int64_t timestamp_utc,
+                                       int16_t utc_offset_minutes)
+{
+    const size_t removed = passport_location_model_retain_local_day(
+        &s_records, timestamp_utc, utc_offset_minutes);
+    if (removed == 0) return false;
+    s_history_page = 0;
+    if (passport_store_can_save() && passport_store_save(&s_records) != ESP_OK)
+        ESP_LOGE(TAG, "Could not persist daily history rollover");
+    ESP_LOGI(TAG, "Removed %u device history records outside the current local day",
+             (unsigned)removed);
+    return true;
+}
+
 static void process_ble_event(const app_event_t *item)
 {
     if (item->data.ble.event == PASSPORT_BLE_PAIRING_CODE) {
@@ -699,13 +712,18 @@ static void process_ble_event(const app_event_t *item)
     if (item->data.ble.event == PASSPORT_BLE_TIME) {
         const passport_ble_result_t *time_result = &item->data.ble.result;
         s_local_utc_offset_minutes = time_result->utc_offset_minutes;
+        const bool history_changed = retain_current_history_day(
+            time_result->timestamp_utc, time_result->utc_offset_minutes);
         const struct timeval tv = {
             .tv_sec = (time_t)time_result->timestamp_utc,
             .tv_usec = 0,
         };
         (void)settimeofday(&tv, NULL);
         if (bsp_lvgl_lock(500)) {
-            refresh_header(NULL);
+            if (history_changed && s_app.screen == PASSPORT_SCREEN_HISTORY)
+                draw_history();
+            else
+                refresh_header(NULL);
             bsp_lvgl_unlock();
         }
         return;
@@ -780,6 +798,14 @@ static void process_ble_event(const app_event_t *item)
         return;
     }
 
+    const size_t history_removed = passport_location_model_retain_local_day(
+        &s_records, result->timestamp_utc, result->utc_offset_minutes);
+    const bool history_pruned = history_removed > 0;
+    if (history_pruned) {
+        s_history_page = 0;
+        ESP_LOGI(TAG, "Removed %u device history records before adding today's result",
+                 (unsigned)history_removed);
+    }
     uint32_t marker_id = 0;
     bool recorded = true;
     if (s_pending_uncheckin) {
@@ -794,19 +820,23 @@ static void process_ble_event(const app_event_t *item)
         }
     }
     if (!recorded) {
+        if (history_pruned && passport_store_can_save() &&
+            passport_store_save(&s_records) != ESP_OK) {
+            ESP_LOGE(TAG, "Device history pruning succeeded but NVS save failed");
+        }
         s_marker_state = MARKER_FAILURE;
         s_marker_note = "手机定位数据无效";
         update_marker_screen();
         return;
     }
 
-    if (!s_pending_uncheckin) {
-        s_local_utc_offset_minutes = result->utc_offset_minutes;
+    s_local_utc_offset_minutes = result->utc_offset_minutes;
+    if (!s_pending_uncheckin || history_pruned) {
         if (passport_store_can_save() && passport_store_save(&s_records) != ESP_OK)
             ESP_LOGE(TAG, "Phone saved location but device NVS save failed");
-        const struct timeval tv = { .tv_sec = (time_t)result->timestamp_utc, .tv_usec = 0 };
-        (void)settimeofday(&tv, NULL);
     }
+    const struct timeval tv = { .tv_sec = (time_t)result->timestamp_utc, .tv_usec = 0 };
+    (void)settimeofday(&tv, NULL);
     if (s_pending_checkin || s_pending_uncheckin) (void)passport_trip_store_save(&s_trip);
     s_marker_state = MARKER_SUCCESS;
     play_sound(SOUND_OK);
@@ -1088,6 +1118,7 @@ static void input_task(void *arg)
 {
     (void)arg;
     app_event_t ev;
+    int64_t last_history_day_check_us = 0;
     for (;;) {
         if (xQueueReceive(s_queue, &ev, pdMS_TO_TICKS(250)) == pdTRUE) process_input(&ev);
         if (s_marker_timeout_pending) {
@@ -1098,6 +1129,16 @@ static void input_task(void *arg)
         }
         if (passport_display_policy_tick(&s_display_policy, esp_timer_get_time()))
             bsp_display_backlight(0);
+        const int64_t now_us = esp_timer_get_time();
+        if (now_us - last_history_day_check_us >= 1000000) {
+            last_history_day_check_us = now_us;
+            const time_t now = time(NULL);
+            if (retain_current_history_day((int64_t)now, s_local_utc_offset_minutes) &&
+                s_app.screen == PASSPORT_SCREEN_HISTORY && bsp_lvgl_lock(500)) {
+                draw_history();
+                bsp_lvgl_unlock();
+            }
+        }
     }
 }
 

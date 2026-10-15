@@ -147,6 +147,35 @@ const passport_marker_t *passport_location_model_newest(
     return &model->markers[index];
 }
 
+size_t passport_location_model_retain_local_day(
+    passport_location_model_t *model,
+    int64_t timestamp_utc,
+    int16_t utc_offset_minutes)
+{
+    if (!passport_location_model_valid(model) || timestamp_utc <= 0 ||
+        utc_offset_minutes < -840 || utc_offset_minutes > 840) {
+        return 0;
+    }
+
+    const int64_t adjusted_now = timestamp_utc + (int64_t)utc_offset_minutes * 60;
+    if (adjusted_now < 0) return 0;
+    const int64_t current_day = adjusted_now / 86400;
+    size_t keep = 0;
+    while (keep < model->count) {
+        const passport_marker_t *marker = passport_location_model_newest(model, keep);
+        if (marker == NULL ||
+            (marker->flags & PASSPORT_MARKER_HAS_TIMESTAMP) == 0) break;
+        const int64_t adjusted_marker = marker->timestamp_utc +
+                                        (int64_t)utc_offset_minutes * 60;
+        if (adjusted_marker < 0 || adjusted_marker / 86400 != current_day) break;
+        keep++;
+    }
+
+    const size_t removed = model->count - keep;
+    model->count = (uint16_t)keep;
+    return removed;
+}
+
 bool passport_location_model_set_last_feature(passport_location_model_t *model,
                                               uint8_t feature_index)
 {

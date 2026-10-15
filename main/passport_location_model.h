@@ -51,5 +51,9 @@ bool passport_location_model_set_place(passport_location_model_t *model,
 const passport_marker_t *passport_location_model_newest(
     const passport_location_model_t *model,
     size_t newest_offset);
+size_t passport_location_model_retain_local_day(
+    passport_location_model_t *model,
+    int64_t timestamp_utc,
+    int16_t utc_offset_minutes);
 bool passport_location_model_set_last_feature(passport_location_model_t *model,
                                               uint8_t feature_index);

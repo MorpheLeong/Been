@@ -88,3 +88,83 @@ Unverified: 仍需板卡、仪器或用户确认的事项
 仅在用户请求或当前工作流明确要求时创建 commit 和 push。普通功能、应用和文档 PR 不得修改 `docs/CHANGELOG.md` 或 `docs/CHANGELOG.zh_CN.md`；用户可见行为、兼容性和发布流程影响改为写入 PR 正文及对应权威文档。发布准备期间，由发布负责人在创建 tag 前把已合并的用户可见变化统一汇总到两份变更日志。
 
 社区规范见 `.github/CONTRIBUTING.zh_CN.md`、`.github/CODE_OF_CONDUCT.zh_CN.md`、`.github/SECURITY.zh_CN.md` 与 `.github/SUPPORT.zh_CN.md`。
+
+## Development Environment / Codex Workflow
+
+本 checkout 已有经过验证的本机环境记录。新任务必须复用它，不得重复探索 SDK
+与工具链。只有需要环境事实或命令细节时才读取：
+[`docs/CODEX_ENV.zh_CN.md`](docs/CODEX_ENV.zh_CN.md)。
+
+### 项目布局
+
+- 仓库与 ESP-IDF 根目录：`C:\Users\MPHNUC\Documents\ChatGPT\AI Passport\ai-passport-fork-checkout\ai-passport-main`
+- Android 根目录/module：`android-app` / `app`
+- 共享协议：`docs/protocols/passport-companion-ble.zh_CN.md`
+- 固件实现：`main`；Android 实现：`android-app/app/src/main`
+
+### Android 环境
+
+- Android SDK：`C:\Users\MPHNUC\AppData\Local\Android\Sdk`
+- JDK：Android Studio JBR，路径为 `C:\Program Files\Android\Android Studio\jbr`
+- 入口：`. .\tools\codex-env.ps1 -Scope Android`，随后使用
+  `android-app\gradlew.bat`。使用脚本选中的 SDK adb，不要使用未准备 host
+  `PATH` 中的裸 `adb`。
+- 已验证门禁：在 `android-app` 中执行
+  `.\gradlew.bat testDebugUnitTest lintDebug assembleDebug`。
+
+### ESP-IDF 环境
+
+- `IDF_PATH`：`C:\Espressif\frameworks\esp-idf-v5.5.3`
+- 版本/目标：ESP-IDF v5.5.3、ESP32-C3、RISC-V。
+- Python：`C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe`
+- 每个新 PowerShell process 的入口：
+  `. .\tools\codex-env.ps1 -Scope EspIdf`。
+- 标准构建：`idf.py build`。用 `python -m serial.tools.list_ports -v` 获取
+  当前串口，绝不能复用以前记录的 COM 号。
+- 烧录/monitor 仍须按常规取得明确授权。命令和镜像 offset 见
+  `docs/CODEX_ENV.zh_CN.md`。
+
+### 标准命令
+
+```powershell
+# 在当前 PowerShell process 中准备两套工具链
+. .\tools\codex-env.ps1
+
+# Android
+Push-Location android-app
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+Pop-Location
+
+# ESP-IDF
+idf.py --version
+idf.py build
+```
+
+### Agent 启动策略
+
+- 每个新任务先读本 `AGENTS.md`。本文件记录的路径、环境与命令是当前项目事实。
+- 不得只为“再次确认环境”而执行大范围 `ls`、`find`、`where`、
+  `Get-ChildItem`，或重新扫描 SDK、JDK、Gradle、adb、ESP-IDF、Python、
+  CMake、Ninja、工具链与项目目录。
+- 新 Codex conversation 不构成重新探索环境的理由。已记录命令可用时，应直接
+  进入相关代码和实现。
+- 某条命令失败时，只根据具体报错调查对应组件；不要重新探索无关工具链。
+  Android 失败不能成为重查 ESP-IDF 的理由，反之亦然。
+- 不要把临时 shell 状态当成永久事实。每个新 PowerShell process 需要环境时，
+  dot-source `tools/codex-env.ps1`。
+- 确认环境真实变化后，同步更新本节、`docs/CODEX_ENV.md` 及中文版和环境脚本。
+
+### Known dead ends
+
+- 未准备的 shell 没有有效 `JAVA_HOME`，直接运行 Gradle Wrapper 会失败。
+- 裸 `adb` 会解析到 Touch Portal 内置 adb，不是 Android SDK adb。
+- 裸 `python` 会解析到 WindowsApps，不是 ESP-IDF virtualenv。
+- 项目激活前的裸 `idf.py` 可能找不到，也可能解析到报告 `v1.0.3` 的无关 host
+  package；它不是 ESP-IDF。两种结果都不能据此认为 ESP-IDF 未安装。
+- 当前非交互 PowerShell 中直接用 `export.ps1` 激活，会把多条输出一起
+  dot-source 并失败；使用 `tools/codex-env.ps1`。
+- 只在子 PowerShell 中激活不会准备父 shell；必须在即将构建的 shell 中
+  dot-source 项目入口。
+- 不得另建 ESP-IDF Python venv、使用系统 Gradle、为 ESP32-C3 选择 Xtensa、
+  硬编码 COM 号/设备 serial、把 app-only 镜像烧到 `0x0`，或把全片擦除当作
+  常规修复方法。
