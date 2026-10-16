@@ -20,6 +20,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.location.Geocoder
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -27,6 +28,7 @@ import android.os.Looper
 import android.os.CancellationSignal
 import android.util.Log
 import java.util.UUID
+import java.util.concurrent.Executors
 
 /** User-started BLE companion service. Android may still stop it or the user may force-stop the app. */
 class PassportBleService : Service() {
@@ -40,6 +42,8 @@ class PassportBleService : Service() {
     private var activeRequestId = -1
     private var syncWhenConnected = false
     private var snapshotWriteActive = false
+    private var snapshotPreparing = false
+    private var syncGeneration = 0
     private var resyncAfterWrites = false
     private var stopping = false
     private var ready = false
@@ -57,6 +61,7 @@ class PassportBleService : Service() {
     private var currentWrite: PendingWrite? = null
     private var pendingSnapshotFrames = 0
     private val commandAssembler = PassportCommandAssembler()
+    private val syncExecutor = Executors.newSingleThreadExecutor()
     private val writeTimeout = Runnable {
         val timedOut = currentWrite ?: return@Runnable
         currentWrite = null
@@ -119,6 +124,7 @@ class PassportBleService : Service() {
     override fun onDestroy() {
         stopping = true
         closeConnection()
+        syncExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -294,7 +300,7 @@ class PassportBleService : Service() {
                 if (pendingSnapshotFrames == 0) {
                     snapshotWriteActive = false
                     syncWhenConnected = false
-                    broadcast(STATE, "清单、二维码和设备设置已同步")
+                    broadcast(STATE, "清单、二维码、头像和设备设置已同步")
                 }
             } else if (completed.characteristic == PassportProtocol.snapshot &&
                 completed.opcode == PassportProtocol.TIME_SYNC) {
@@ -397,11 +403,23 @@ class PassportBleService : Service() {
                 requestId, request.destinationId, request.name, location.latitude, location.longitude,
                 savedAt, location.accuracy
             )
+            if (saved && Geocoder.isPresent()) {
+                Thread {
+                    runCatching {
+                        val address = Geocoder(this).getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull()
+                        if (address != null) {
+                            val label = address.featureName ?: address.locality ?: address.getAddressLine(0)
+                            db.enrichTrackFromSystem(requestId, label.orEmpty(), address.getAddressLine(0))
+                            broadcast(STATE, "地点信息已更新", dataChanged = true)
+                        }
+                    }
+                }.start()
+            }
         } else {
             Log.w(TAG, "location unavailable request=${request.request} error=$error")
         }
         if (saved) {
-            db.markDestinationDone(request.destinationId)
+            if (request.destinationId.isNotEmpty()) db.markDestinationDone(request.destinationId)
             Log.w(TAG, "track saved request=${request.request} destination=${request.destinationId}")
             broadcast(STATE, "轨迹已保存，正在回传 Passport", dataChanged = true)
             sendResult(request.request, true)
@@ -488,27 +506,51 @@ class PassportBleService : Service() {
     }
     private fun syncSnapshot() {
         val g = gatt ?: return
-        if (snapshotWriteActive) { resyncAfterWrites = true; return }
+        if (snapshotWriteActive || snapshotPreparing) { resyncAfterWrites = true; return }
         if (g.getService(PassportProtocol.service)?.getCharacteristic(PassportProtocol.snapshot) == null) return
         val chunkPayload = (negotiatedMtu - SNAPSHOT_FRAME_OVERHEAD)
             .coerceIn(LEGACY_CHUNK_PAYLOAD, MAX_CHUNK_PAYLOAD)
-        val frames = runCatching {
-            PassportProtocol.snapshotFrames(++revision, PassportProtocol.snapshotPayload(db), chunkPayload)
-        }.getOrElse {
-            broadcast(STATE, "二维码同步数据超出设备协议限制"); return
+        val avatarChunkPayload = (negotiatedMtu - AVATAR_FRAME_OVERHEAD)
+            .coerceIn(LEGACY_AVATAR_CHUNK_PAYLOAD, MAX_AVATAR_CHUNK_PAYLOAD)
+        val generation = syncGeneration
+        snapshotPreparing = true
+        broadcast(STATE, "正在准备清单和头像")
+        syncExecutor.execute {
+            val prepared = runCatching {
+                val profile = db.profile()
+                val snapshot = PassportProtocol.snapshotPayload(db)
+                val avatar = profile.avatarPath?.let { path ->
+                    AvatarImage.deviceRgb565(path) ?: error("头像原图无法读取")
+                }
+                Triple(snapshot, avatar, db.screenTimeoutSeconds())
+            }
+            main.post {
+                if (generation != syncGeneration || gatt !== g || !ready) return@post
+                snapshotPreparing = false
+                val data = prepared.getOrElse {
+                    broadcast(STATE, "头像或清单读取失败，请重新选择头像后重试")
+                    return@post
+                }
+                val frames = runCatching {
+                    PassportProtocol.snapshotFrames(++revision, data.first, chunkPayload) +
+                        PassportProtocol.avatarFrames(data.second, avatarChunkPayload) +
+                        PassportProtocol.screenTimeoutFrame(data.third) + PassportProtocol.timeSyncFrame()
+                }.getOrElse {
+                    broadcast(STATE, "同步数据超出设备协议限制")
+                    return@post
+                }
+                pendingSnapshotFrames = frames.size
+                snapshotWriteActive = true
+                frames.forEach { frame ->
+                    writes.addLast(PendingWrite(
+                        PassportProtocol.snapshot,
+                        frame,
+                        opcode = frame[1].toInt() and 0xff,
+                    ))
+                }
+                pumpWrites(g)
+            }
         }
-        val allFrames = frames + PassportProtocol.screenTimeoutFrame(db.screenTimeoutSeconds()) +
-            PassportProtocol.timeSyncFrame()
-        pendingSnapshotFrames = allFrames.size
-        snapshotWriteActive = true
-        allFrames.forEach { frame ->
-            writes.addLast(PendingWrite(
-                PassportProtocol.snapshot,
-                frame,
-                opcode = frame[1].toInt() and 0xff,
-            ))
-        }
-        pumpWrites(g)
     }
 
     private fun syncClock() {
@@ -561,11 +603,14 @@ class PassportBleService : Service() {
         currentWrite = null
         main.removeCallbacks(writeTimeout)
         snapshotWriteActive = false
+        snapshotPreparing = false
         pendingSnapshotFrames = 0
+        val avatarOpcode = write.opcode in PassportProtocol.AVATAR_BEGIN..PassportProtocol.AVATAR_CLEAR
         broadcast(STATE, if (write.characteristic == PassportProtocol.result)
             "打卡结果发送失败，请在设备上重试" else if (write.opcode == PassportProtocol.SCREEN_TIMEOUT)
             "清单已同步，亮屏设置失败，请更新固件后重试" else if (write.opcode == PassportProtocol.TIME_SYNC)
-            "设备时间同步失败，请断开后重连" else "清单同步写入失败")
+            "设备时间同步失败，请断开后重连" else if (avatarOpcode)
+            "头像同步失败，请确认设备固件已更新后重试" else "清单同步写入失败")
     }
 
     @Suppress("MissingPermission", "DEPRECATION")
@@ -690,6 +735,8 @@ class PassportBleService : Service() {
         currentWrite = null
         main.removeCallbacks(writeTimeout)
         snapshotWriteActive = false
+        snapshotPreparing = false
+        syncGeneration++
         resyncAfterWrites = false
         pendingSnapshotFrames = 0
         activeCheckIn = false
@@ -737,6 +784,9 @@ class PassportBleService : Service() {
         private const val SNAPSHOT_FRAME_OVERHEAD = 9
         private const val LEGACY_CHUNK_PAYLOAD = 14
         private const val MAX_CHUNK_PAYLOAD = 238
+        private const val AVATAR_FRAME_OVERHEAD = 7
+        private const val LEGACY_AVATAR_CHUNK_PAYLOAD = 16
+        private const val MAX_AVATAR_CHUNK_PAYLOAD = 240
         private const val MAX_WRITE_RETRIES = 2
         private const val WRITE_RETRY_DELAY_MS = 120L
         private const val WRITE_TIMEOUT_MS = 5_000L

@@ -77,6 +77,10 @@ run_static_checks() {
         -o "${test_dir}/test_passport_trip_model${executable_suffix}"
     "${test_dir}/test_passport_trip_model${executable_suffix}"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_passport_avatar_protocol.c main/passport_avatar_protocol.c \
+        -o "${test_dir}/test_passport_avatar_protocol${executable_suffix}"
+    "${test_dir}/test_passport_avatar_protocol${executable_suffix}"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
         tests/test_passport_ble_ids.c \
         -o "${test_dir}/test_passport_ble_ids${executable_suffix}"
     "${test_dir}/test_passport_ble_ids${executable_suffix}"

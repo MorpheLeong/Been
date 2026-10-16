@@ -63,7 +63,7 @@ The device stores only the timestamp and checklist item name from a successful r
 
 A snapshot contains up to 64 destinations and up to 10 QR codes. QR names are at most 48 bytes and payloads at most 192 bytes. Up to three starred codes claim slots first; remaining slots are filled by QR codes for incomplete destinations in checklist order, then by completed destinations if space remains. A destination can bind to at most one QR code. The app is the sole owner of ordering, starring, completion, and rolling-window rules.
 
-Only an explicit tap on the top-right Sync button sends checklist, QR, and screen-timeout data through acknowledged GATT writes, serially waiting for each write callback. Editing the checklist, QR codes, profile, or settings saves locally and does not automatically generate synchronization traffic. The BLE connection stays active so it can receive track and check-in requests initiated by Passport.
+Only an explicit tap on the top-right Sync button sends checklist, QR, profile/avatar, and screen-timeout data through acknowledged GATT writes, serially waiting for each write callback. Editing the checklist, QR codes, profile, or settings saves locally and does not automatically generate synchronization traffic. The BLE connection stays active so it can receive track and check-in requests initiated by Passport.
 
 - Begin frame (10 bytes): version 0x03, opcode 0x10, revision uint16, payload length uint16, CRC32 uint32.
 - Data frame: version 0x03, opcode 0x11, revision uint16, offset uint16, with ATT MTU minus 9 data bytes: 14 bytes at the default MTU 23 or up to 238 bytes at MTU 247.
@@ -89,6 +89,17 @@ The payload contains destination count uint8; each destination has ID length and
 ## Profile and sound settings
 
 The snapshot adds UTF-8 nickname (up to 48 bytes), bio (96 bytes), up to four social account IDs (48 bytes each), and a final uint8 sound volume (0–100, default 50). Snapshot protocol version is 3. Both device font sizes cover all 6,763 GB2312 ideographs.
+
+### Avatar transfer
+
+The app keeps the user's square crop as a local PNG. During an explicit sync it composites transparency on `#101C18`, scales once to the 46×46 content area inside the 48×48 home avatar border, and sends 4,232 bytes of little-endian RGB565 on the snapshot characteristic. Avatar transfer is separate from the trip snapshot so the existing snapshot payload stays compatible.
+
+- Begin: `03 15 01 2E 2E 88 10 CRC32`, where format 1 is RGB565 little-endian, dimensions are uint8, length and CRC are little-endian.
+- Chunk: `03 16 OFFSET DATA`; offset is uint16 little-endian and chunks must be contiguous.
+- Commit: `03 17`; the device accepts it only after all bytes and CRC match, then persists the image.
+- Clear: `03 18`; removes the persisted avatar and restores the fallback profile glyph (`U+6211`).
+
+All frames use acknowledged writes. With the legacy ATT MTU the app sends 16 data bytes per avatar chunk; with negotiated MTU 247 it sends up to 240. Invalid, out-of-order, truncated, or corrupt transfers leave the previous avatar intact.
 
 ## Screen timeout setting and device navigation
 

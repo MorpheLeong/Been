@@ -29,6 +29,14 @@ esp_lcd_panel_io_handle_t bsp_display_io(void);
 // 背光亮度 0..100(%)。LEDC PWM,0=全灭。
 void bsp_display_backlight(uint8_t percent);
 
+// 日常可恢复息屏：关闭显示并让 ST7789 进入 Sleep In，但保留 SPI/LVGL 资源。
+// 调用方必须先阻止 LVGL flush；成功后可用 bsp_display_wake() 恢复。
+esp_err_t bsp_display_sleep(void);
+
+// 从日常息屏恢复 ST7789。成功后面板已开启，但背光仍保持关闭，调用方应在
+// LVGL 恢复并请求整屏刷新后再设置所需亮度。
+esp_err_t bsp_display_wake(void);
+
 // deep sleep 专用：关闭显示、让 ST7789 进入 Sleep In，停止背光 PWM，
 // 将 CS/SCLK/MOSI/DC/背光设为安全电平并在 deep sleep 中保持。调用时必须
 // 已阻止 LVGL 刷屏，调用后必须立即进入 deep sleep 或重启。
@@ -51,3 +59,8 @@ struct _lv_display_t *bsp_lvgl_init(void);
 // LVGL 尚未就绪或超时时 lock 返回 false；只有 lock 成功后才调用 unlock。
 bool bsp_lvgl_lock(int timeout_ms);
 void bsp_lvgl_unlock(void);
+
+// 在已持有 bsp_lvgl_lock() 时暂停/恢复 LVGL tick。暂停不会删除 UI 对象，
+// 适合与上面的可恢复 LCD 息屏配对；BLE 和应用任务不受影响。
+esp_err_t bsp_lvgl_stop(void);
+esp_err_t bsp_lvgl_resume(void);

@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "passport_app_model.h"
+#include "passport_avatar.h"
 #include "passport_ble_link.h"
 #include "passport_display_policy.h"
 #include "passport_location_model.h"
@@ -28,6 +29,8 @@
 
 #define INPUT_QUEUE_DEPTH 24
 #define SOUND_QUEUE_DEPTH 4
+#define SOUND_IDLE_SLEEP_MS 250
+#define PASSPORT_BACKLIGHT_PERCENT 60
 #define C_BG 0x050B0A
 #define C_PANEL 0x101C18
 #define C_LINE 0x29483A
@@ -78,6 +81,7 @@ static lv_obj_t *s_marker_card;
 static lv_obj_t *s_clock_text;
 static lv_obj_t *s_battery_text;
 static lv_obj_t *s_connection_dots[4];
+static lv_display_t *s_lv_display;
 static lv_timer_t *s_clock_timer;
 static size_t s_history_page;
 static size_t s_trip_page;
@@ -111,6 +115,7 @@ static lv_font_t s_gb2312_font_20;
 static lv_font_t s_cjk_fallback_14;
 static lv_font_t s_cjk_fallback_20;
 static esp_timer_handle_t s_marker_timeout;
+static bool s_display_sleeping;
 static const char *s_marker_note = "请先连接手机";
 static void base_screen(const char *title);
 static void show_screen(passport_screen_t screen);
@@ -134,6 +139,19 @@ static lv_image_dsc_t s_qr_image = {
     .data = (const uint8_t *)s_qr_pixels,
 };
 static bool s_qr_ready;
+static lv_image_dsc_t s_avatar_image = {
+    .header = {
+        .magic = LV_IMAGE_HEADER_MAGIC,
+        .cf = LV_COLOR_FORMAT_RGB565,
+        .flags = 0,
+        .w = PASSPORT_AVATAR_WIDTH,
+        .h = PASSPORT_AVATAR_HEIGHT,
+        .stride = PASSPORT_AVATAR_WIDTH * sizeof(uint16_t),
+        .reserved_2 = 0,
+    },
+    .data_size = PASSPORT_AVATAR_BYTE_COUNT,
+    .data = NULL,
+};
 
 typedef enum { SOUND_KEY = 1, SOUND_OK, SOUND_ERROR } sound_cue_t;
 
@@ -154,9 +172,20 @@ static void sound_task(void *arg)
     // Keep the 1.28 KB cue buffer out of this task's limited stack.
     static int16_t pcm[640];
     bool audio_ready = false;
+    bool audio_awake = false;
     sound_cue_t cue;
     for (;;) {
-        if (xQueueReceive(s_sound_queue, &cue, portMAX_DELAY) != pdTRUE) continue;
+        const TickType_t wait = audio_awake ? pdMS_TO_TICKS(SOUND_IDLE_SLEEP_MS)
+                                            : portMAX_DELAY;
+        if (xQueueReceive(s_sound_queue, &cue, wait) != pdTRUE) {
+            if (audio_awake) {
+                const esp_err_t err = bsp_audio_sleep();
+                if (err != ESP_OK)
+                    ESP_LOGW(TAG, "提示音设备休眠失败: %s", esp_err_to_name(err));
+                audio_awake = false;
+            }
+            continue;
+        }
         if (!audio_ready) {
             if (bsp_audio_init() != ESP_OK || bsp_audio_set_format(16000, 16, 1) != ESP_OK) {
                 ESP_LOGW(TAG, "提示音设备初始化失败");
@@ -164,7 +193,15 @@ static void sound_task(void *arg)
                 continue;
             }
             audio_ready = true;
+            audio_awake = true;
             log_memory("audio-ready");
+        } else if (!audio_awake) {
+            const esp_err_t err = bsp_audio_wake();
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "提示音设备唤醒失败: %s", esp_err_to_name(err));
+                continue;
+            }
+            audio_awake = true;
         }
         bsp_audio_set_volume(s_trip.profile.volume_percent);
         const uint32_t frequency = cue == SOUND_ERROR ? 220U : (cue == SOUND_OK ? 880U : 660U);
@@ -177,6 +214,50 @@ static void sound_task(void *arg)
         }
         (void)bsp_audio_write(pcm, sizeof(pcm));
     }
+}
+
+static bool display_sleep(void)
+{
+    if (s_display_sleeping) return true;
+    if (!bsp_lvgl_lock(500)) return false;
+    esp_err_t err = bsp_lvgl_stop();
+    if (err == ESP_OK) err = bsp_display_sleep();
+    if (err != ESP_OK) (void)bsp_lvgl_resume();
+    bsp_lvgl_unlock();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "息屏失败: %s", esp_err_to_name(err));
+        bsp_display_backlight(PASSPORT_BACKLIGHT_PERCENT);
+        return false;
+    }
+    s_display_sleeping = true;
+    return true;
+}
+
+static bool display_wake(void)
+{
+    if (!s_display_sleeping) {
+        bsp_display_backlight(PASSPORT_BACKLIGHT_PERCENT);
+        return true;
+    }
+    if (!bsp_lvgl_lock(500)) return false;
+    esp_err_t err = bsp_display_wake();
+    if (err == ESP_OK) err = bsp_lvgl_resume();
+    if (err == ESP_OK && s_screen != NULL) {
+        lv_obj_invalidate(s_screen);
+        lv_refr_now(s_lv_display);
+    }
+    if (err != ESP_OK) {
+        (void)bsp_lvgl_stop();
+        (void)bsp_display_sleep();
+    }
+    bsp_lvgl_unlock();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "亮屏恢复失败: %s", esp_err_to_name(err));
+        return false;
+    }
+    s_display_sleeping = false;
+    bsp_display_backlight(PASSPORT_BACKLIGHT_PERCENT);
+    return true;
 }
 
 static void play_sound(sound_cue_t cue)
@@ -365,7 +446,14 @@ static void draw_home(void)
     base_screen("首页");
     lv_obj_t *head = panel(s_screen, 8, 42, 224, 76);
     lv_obj_t *avatar = panel(head, 8, 8, 48, 48);
-    label(avatar, "我", 7, 13, 34, 24, C_GREEN, &lv_font_montserrat_20);
+    if (passport_avatar_has_image()) {
+        s_avatar_image.data = (const uint8_t *)passport_avatar_pixels();
+        lv_obj_t *image = lv_image_create(avatar);
+        lv_image_set_src(image, &s_avatar_image);
+        lv_obj_set_pos(image, 1, 1);
+    } else {
+        label(avatar, "我", 7, 13, 34, 24, C_GREEN, &lv_font_montserrat_20);
+    }
     label(head, s_trip.profile.nickname[0] ? s_trip.profile.nickname : "未设置昵称",
           68, 21, 145, 24, C_WHITE, &lv_font_montserrat_20);
     if (s_clock_timer == NULL) s_clock_timer = lv_timer_create(refresh_header, 1000, NULL);
@@ -696,8 +784,11 @@ static bool retain_current_history_day(int64_t timestamp_utc,
 static void process_ble_event(const app_event_t *item)
 {
     if (item->data.ble.event == PASSPORT_BLE_PAIRING_CODE) {
-        (void)passport_display_policy_activity(&s_display_policy, esp_timer_get_time());
-        bsp_display_backlight(100);
+        if (passport_display_policy_activity(&s_display_policy, esp_timer_get_time()) &&
+            !display_wake()) {
+            s_display_policy.lit = false;
+            return;
+        }
         if (bsp_lvgl_lock(500)) {
             draw_pairing_code(item->data.ble.pairing_code);
             bsp_lvgl_unlock();
@@ -735,6 +826,13 @@ static void process_ble_event(const app_event_t *item)
             else if (s_app.screen == PASSPORT_SCREEN_QR_LIST) draw_qr_list();
             else if (s_app.screen == PASSPORT_SCREEN_QR) draw_qr();
             else if (s_app.screen == PASSPORT_SCREEN_PROFILE) draw_profile();
+            bsp_lvgl_unlock();
+        }
+        return;
+    }
+    if (item->data.ble.event == PASSPORT_BLE_AVATAR) {
+        if (s_app.screen == PASSPORT_SCREEN_HOME && bsp_lvgl_lock(500)) {
+            draw_home();
             bsp_lvgl_unlock();
         }
         return;
@@ -962,7 +1060,10 @@ static void process_input(const app_event_t *ev)
      * 第一次唤醒的整个手势被消费，直到下一个 PRESS，避免长按误进入页面。 */
     if (ev->data.button.event == BSP_BTN_PRESS) s_consume_wake_gesture = false;
     if (passport_display_policy_activity(&s_display_policy, esp_timer_get_time())) {
-        bsp_display_backlight(100);
+        if (!display_wake()) {
+            s_display_policy.lit = false;
+            return;
+        }
         s_consume_wake_gesture = true;
         s_wake_button = ev->data.button.btn;
         return;
@@ -1127,8 +1228,11 @@ static void input_task(void *arg)
             timeout.data.request_id = s_timeout_request_id;
             process_input(&timeout);
         }
-        if (passport_display_policy_tick(&s_display_policy, esp_timer_get_time()))
-            bsp_display_backlight(0);
+        if (passport_display_policy_tick(&s_display_policy, esp_timer_get_time()) &&
+            !display_sleep()) {
+            s_display_policy.lit = true;
+            s_display_policy.last_activity_us = esp_timer_get_time();
+        }
         const int64_t now_us = esp_timer_get_time();
         if (now_us - last_history_day_check_us >= 1000000) {
             last_history_day_check_us = now_us;
@@ -1155,14 +1259,14 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "AI Passport location notebook boot");
     bsp_i2c_init();
-    if (bsp_display_init() != ESP_OK || bsp_lvgl_init() == NULL) {
+    if (bsp_display_init() != ESP_OK || (s_lv_display = bsp_lvgl_init()) == NULL) {
         ESP_LOGE(TAG, "Display/LVGL initialization failed (MOSI=%d SCLK=%d CS=%d DC=%d BL=%d)",
                  BSP_LCD_MOSI, BSP_LCD_SCLK, BSP_LCD_CS, BSP_LCD_DC, BSP_LCD_BL);
         return;
     }
     log_memory("display-ready");
     app_fonts_init();
-    bsp_display_backlight(100);
+    bsp_display_backlight(PASSPORT_BACKLIGHT_PERCENT);
     s_battery_ready = bsp_battery_init() == ESP_OK;
     passport_location_model_init(&s_records);
     const esp_err_t store_err = passport_store_init(&s_records);
@@ -1171,6 +1275,9 @@ void app_main(void)
     const esp_err_t trip_err = passport_trip_store_init(&s_trip);
     if (trip_err != ESP_OK)
         ESP_LOGW(TAG, "Starting with RAM itinerary only: %s", esp_err_to_name(trip_err));
+    const esp_err_t avatar_err = passport_avatar_init();
+    if (avatar_err != ESP_OK)
+        ESP_LOGW(TAG, "Starting without stored avatar: %s", esp_err_to_name(avatar_err));
     log_memory("storage-ready");
     passport_display_policy_init(&s_display_policy, esp_timer_get_time(),
                                  passport_trip_store_screen_timeout());

@@ -19,6 +19,7 @@ static esp_lcd_panel_io_handle_t s_io;
 static bool                      s_bus_ready;
 static bool                      s_bl_ready;
 static bool                      s_ready;
+static bool                      s_runtime_sleeping;
 
 static const gpio_num_t s_deep_sleep_pins[] = {
     BSP_LCD_CS, BSP_LCD_SCLK, BSP_LCD_MOSI, BSP_LCD_DC, BSP_LCD_BL,
@@ -106,7 +107,8 @@ static esp_err_t backlight_init(void) {
         .timer_num       = BSP_BL_LEDC_TIMER,
         .duty_resolution = BSP_BL_LEDC_RES,
         .freq_hz         = BSP_BL_LEDC_FREQ_HZ,
-        .clk_cfg         = LEDC_AUTO_CLK,
+        // XTAL keeps the PWM stable while CPU/APB frequency scales under DFS.
+        .clk_cfg         = LEDC_USE_XTAL_CLK,
     };
     esp_err_t e = ledc_timer_config(&t);
     if (e != ESP_OK) { ESP_LOGE(TAG, "ledc_timer_config 失败: %s", esp_err_to_name(e)); return e; }
@@ -203,6 +205,7 @@ esp_err_t bsp_display_init(void) {
     e = backlight_init();
     if (e != ESP_OK) goto fail;
     s_ready = true;
+    s_runtime_sleeping = false;
     ESP_LOGI(TAG, "显示就绪 %dx%d", BSP_LCD_W, BSP_LCD_H);
     return ESP_OK;
 
@@ -238,6 +241,47 @@ void bsp_display_backlight(uint8_t percent) {
     uint32_t duty = (max_duty * percent) / 100u;
     ledc_set_duty(BSP_BL_LEDC_MODE, BSP_BL_LEDC_CHANNEL, duty);
     ledc_update_duty(BSP_BL_LEDC_MODE, BSP_BL_LEDC_CHANNEL);
+}
+
+esp_err_t bsp_display_sleep(void) {
+    if (!s_ready || !s_panel) return ESP_ERR_INVALID_STATE;
+    if (s_runtime_sleeping) return ESP_OK;
+
+    bsp_display_backlight(0);
+    esp_err_t e = esp_lcd_panel_disp_on_off(s_panel, false);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 关闭显示失败: %s", esp_err_to_name(e));
+        return e;
+    }
+    e = esp_lcd_panel_disp_sleep(s_panel, true);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 进入可恢复休眠失败: %s", esp_err_to_name(e));
+        (void)esp_lcd_panel_disp_on_off(s_panel, true);
+        return e;
+    }
+    s_runtime_sleeping = true;
+    ESP_LOGI(TAG, "ST7789 已进入可恢复休眠");
+    return ESP_OK;
+}
+
+esp_err_t bsp_display_wake(void) {
+    if (!s_ready || !s_panel) return ESP_ERR_INVALID_STATE;
+    if (!s_runtime_sleeping) return ESP_OK;
+
+    esp_err_t e = esp_lcd_panel_disp_sleep(s_panel, false);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 退出可恢复休眠失败: %s", esp_err_to_name(e));
+        return e;
+    }
+    e = esp_lcd_panel_disp_on_off(s_panel, true);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 恢复显示失败: %s", esp_err_to_name(e));
+        (void)esp_lcd_panel_disp_sleep(s_panel, true);
+        return e;
+    }
+    s_runtime_sleeping = false;
+    ESP_LOGI(TAG, "ST7789 已从可恢复休眠唤醒");
+    return ESP_OK;
 }
 
 esp_err_t bsp_display_prepare_deep_sleep(void) {

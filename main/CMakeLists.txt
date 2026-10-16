@@ -1,6 +1,8 @@
 idf_component_register(
     SRCS "main.c"
          "passport_app_model.c"
+         "passport_avatar.c"
+         "passport_avatar_protocol.c"
          "passport_ble_link.c"
          "passport_location_model.c"
          "passport_location_protocol.c"

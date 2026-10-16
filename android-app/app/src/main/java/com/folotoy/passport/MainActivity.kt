@@ -8,6 +8,8 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.bluetooth.BluetoothManager
 import android.provider.Settings
+import android.provider.OpenableColumns
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -16,10 +18,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,9 +53,12 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -77,6 +86,7 @@ import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSiz
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -86,10 +96,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -99,6 +116,7 @@ import java.util.Date
 import android.location.Address
 import android.location.Geocoder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -108,6 +126,7 @@ class MainActivity : ComponentActivity() {
     private val bleState = mutableStateOf("未连接")
     private val bleConnected = mutableStateOf(false)
     private val dataRevision = mutableIntStateOf(0)
+    private val pendingShare = mutableStateOf<ImportSource?>(null)
     private val stateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             intent.getStringExtra(PassportBleService.EXTRA_STATE)?.let { bleState.value = it }
@@ -133,6 +152,7 @@ class MainActivity : ComponentActivity() {
         }
         val filter = IntentFilter(PassportBleService.STATE)
         ContextCompat.registerReceiver(this, stateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        pendingShare.value = decodeShare(intent)
         setContent {
             val context = LocalContext.current
             val db = remember { PassportDb(context) }
@@ -142,9 +162,28 @@ class MainActivity : ComponentActivity() {
                     windowSizeClass.widthSizeClass,
                     { requestBlePermissions { connectOrOpenSettings() } },
                     { stopBle() },
-                    { requestBlePermissions { requestSync() } })
+                    { requestBlePermissions { requestSync() } },
+                    pendingShare.value,
+                    { pendingShare.value = null })
             }
         }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingShare.value = decodeShare(intent)
+    }
+    @Suppress("DEPRECATION")
+    private fun decodeShare(intent: Intent?): ImportSource? {
+        if (intent?.action != Intent.ACTION_SEND) return null
+        val uri = intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+        if (uri != null) {
+            val displayName = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+            return ImportSource.Document(uri, intent.type, displayName)
+        }
+        return intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf(String::isNotBlank)?.let(ImportSource::Pasted)
     }
     private fun hasRequiredPermissions(): Boolean {
         val locationReady = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -229,12 +268,18 @@ private fun PassportApp(
     connect: () -> Unit,
     disconnect: () -> Unit,
     sync: () -> Unit,
+    sharedSource: ImportSource?,
+    onSharedSourceConsumed: () -> Unit,
 ) {
     val context = LocalContext.current
     var tab by remember { mutableStateOf(Tab.Tracks) }
     var revision by remember { mutableIntStateOf(0) }
     var importing by remember { mutableStateOf(false) }
+    var initialImportSource by remember { mutableStateOf<ImportSource?>(null) }
     var editingTrack by remember { mutableStateOf<TrackPoint?>(null) }
+    var initialMapLink by remember { mutableStateOf<String?>(null) }
+    var pendingMapShare by remember { mutableStateOf<String?>(null) }
+    var mapMode by remember { mutableStateOf(false) }
     val destinations = remember(revision, externalRevision) { db.destinations() }
     val qrs = remember(revision, externalRevision) { db.qrs() }
     val tracks = remember(revision, externalRevision) { db.tracks() }
@@ -243,7 +288,22 @@ private fun PassportApp(
     val screenTimeout = remember(revision, externalRevision) { db.screenTimeoutSeconds() }
     val refresh: () -> Unit = { revision++ }
     val compact = widthSizeClass == WindowWidthSizeClass.Compact
-    Row(Modifier.fillMaxSize()) {
+    LaunchedEffect(sharedSource) {
+        if (sharedSource == null) return@LaunchedEffect
+        val sharedText = (sharedSource as? ImportSource.Pasted)?.value
+        val mapUrl = sharedText?.let(PlaceLinkParser::firstUrl)?.takeIf(PlaceLinkParser::isSupportedUrl)
+        if (mapUrl != null) {
+            if (tracks.isEmpty()) Toast.makeText(context, "还没有可关联的轨迹记录", Toast.LENGTH_LONG).show()
+            else pendingMapShare = sharedText
+        } else {
+            initialImportSource = sharedSource
+            importing = true
+        }
+        onSharedSourceConsumed()
+    }
+    if (mapMode) {
+        TrackMapScreen(rows = tracks, onBack = { mapMode = false }, onEdit = { editingTrack = it })
+    } else Row(Modifier.fillMaxSize()) {
         if (!compact) {
             NavigationRail {
                 Spacer(Modifier.size(12.dp))
@@ -297,7 +357,7 @@ private fun PassportApp(
                         .padding(horizontal = if (compact) 16.dp else 24.dp),
                 ) {
                     when (tab) {
-                        Tab.Tracks -> TracksPage(tracks, { editingTrack = it })
+                        Tab.Tracks -> TracksPage(tracks, { editingTrack = it }, { mapMode = true })
                         Tab.Checklist -> ChecklistPage(db, destinations, refresh, { importing = true })
                         Tab.Qr -> QrPage(db, qrs, destinations, refresh)
                         Tab.Me -> ProfileSettingsPage(
@@ -306,6 +366,10 @@ private fun PassportApp(
                                 runCatching { db.saveProfile(value) }
                                     .onSuccess { refresh(); Toast.makeText(context, "已保存；点右上角同步到 Passport", Toast.LENGTH_SHORT).show() }
                                     .onFailure { Toast.makeText(context, "个人资料保存失败", Toast.LENGTH_LONG).show() }
+                            },
+                            onAvatarChange = { path ->
+                                db.setAvatarPath(path); refresh()
+                                Toast.makeText(context, "头像已保存；点右上角同步到 Passport", Toast.LENGTH_SHORT).show()
                             },
                             onVolumeSave = { value -> db.setSoundVolume(value); refresh() },
                             onScreenTimeoutSave = { value ->
@@ -318,21 +382,50 @@ private fun PassportApp(
             }
         }
     }
-    if (importing) ImportDialog(onDismiss = { importing = false }) { text ->
-        val names = text.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
-        val capacity = (64 - db.destinations().size).coerceAtLeast(0)
-        names.take(capacity).forEach(db::addDestination)
-        if (names.size > capacity) Toast.makeText(context, "Passport 一份清单最多同步 64 个目的地", Toast.LENGTH_LONG).show()
-        refresh(); importing = false
+    pendingMapShare?.let { sharedText ->
+        AlertDialog(
+            onDismissRequest = { pendingMapShare = null },
+            title = { Text("选择要更新的轨迹") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(tracks, key = { it.id }) { track ->
+                        TextButton(onClick = {
+                            initialMapLink = sharedText
+                            editingTrack = track
+                            pendingMapShare = null
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(track.name, fontWeight = FontWeight.Medium)
+                                Text(formatTrackDate(track), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pendingMapShare = null }) { Text("取消") } },
+        )
+    }
+    if (importing) SmartImportDialog(initialImportSource, destinations.map { it.name }.toSet(), onDismiss = {
+        importing = false; initialImportSource = null
+    }) { names ->
+        val added = db.addDestinations(names)
+        if (added < names.size) Toast.makeText(context, "仅导入 $added 项：Passport 一份清单最多同步 64 个目的地", Toast.LENGTH_LONG).show()
+        refresh(); importing = false; initialImportSource = null
     }
     editingTrack?.let { track ->
         TrackEditorDialog(
             track,
-            onDismiss = { editingTrack = null },
+            initialLink = initialMapLink,
+            onDismiss = { editingTrack = null; initialMapLink = null },
             onDelete = { db.deleteTrack(track.id); refresh(); editingTrack = null },
-        ) { name, lat, lon -> db.updateTrack(track.id, name, lat, lon); refresh(); editingTrack = null }
+            onSave = { name, lat, lon -> db.updateTrack(track.id, name, lat, lon); refresh(); editingTrack = null; initialMapLink = null },
+            onApplyPlace = { place -> db.updateTrackPlace(track.id, place); refresh(); editingTrack = null; initialMapLink = null },
+        )
     }
 }
+
+private fun formatTrackDate(track: TrackPoint): String =
+    "${DateFormat.getDateTimeInstance().format(Date(track.time))} · ${track.lat}, ${track.lon}"
 
 @Composable
 private fun ProfileSettingsPage(
@@ -344,6 +437,7 @@ private fun ProfileSettingsPage(
     connect: () -> Unit,
     disconnect: () -> Unit,
     onSave: (PassportProfile) -> Unit,
+    onAvatarChange: (String?) -> Unit,
     onVolumeSave: (Int) -> Unit,
     onScreenTimeoutSave: (Int) -> Unit,
 ) {
@@ -352,6 +446,21 @@ private fun ProfileSettingsPage(
     var socialIds by remember(profile) { mutableStateOf(profile.socialIds.joinToString("\n")) }
     var volumeDraft by remember(volume) { mutableFloatStateOf(volume.toFloat()) }
     var timeoutMenuOpen by remember { mutableStateOf(false) }
+    var cropSource by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var avatarBusy by remember { mutableStateOf(false) }
+    var avatarError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val avatar = remember(profile.avatarPath) { AvatarImage.loadPreview(profile.avatarPath) }
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            avatarBusy = true; avatarError = null
+            runCatching { withContext(Dispatchers.IO) { AvatarImage.decode(context, uri) } }
+                .onSuccess { cropSource = it }
+                .onFailure { avatarError = it.message ?: "无法读取头像" }
+            avatarBusy = false
+        }
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -386,13 +495,39 @@ private fun ProfileSettingsPage(
         Text("个人资料", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Surface(
+                        modifier = Modifier.size(88.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ) {
+                        if (avatar != null) Image(
+                            avatar.asImageBitmap(), "当前头像", Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
+                        ) else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(38.dp))
+                        }
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { avatarPicker.launch(arrayOf("image/*")) },
+                            enabled = !avatarBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (avatarBusy) "正在读取…" else if (avatar == null) "从本地选择头像" else "更换头像") }
+                        if (profile.avatarPath != null) OutlinedButton(onClick = {
+                            AvatarImage.remove(profile.avatarPath); onAvatarChange(null)
+                        }, modifier = Modifier.fillMaxWidth()) { Text("移除头像") }
+                    }
+                }
+                Text("裁切比例固定为 1:1，可拖动和双指缩放；手机保留裁切后的高清原图。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                avatarError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 OutlinedTextField(nickname, { nickname = it }, label = { Text("机主昵称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(bio, { bio = it }, label = { Text("简介") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(socialIds, { socialIds = it }, label = { Text("社交账号 ID") }, supportingText = { Text("每行一个，最多 4 个") }, minLines = 3, modifier = Modifier.fillMaxWidth())
                 Text("设备字库可能无法显示生僻字。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = {
                     val accounts = socialIds.lineSequence().map(String::trim).filter(String::isNotEmpty).take(4).toList()
-                    onSave(PassportProfile(nickname, bio, accounts))
+                    onSave(PassportProfile(nickname, bio, accounts, profile.avatarPath))
                 }, modifier = Modifier.fillMaxWidth()) { Text("保存资料") }
             }
         }
@@ -425,12 +560,89 @@ private fun ProfileSettingsPage(
             }
         }
     }
+    cropSource?.let { source ->
+        AvatarCropDialog(
+            source = source,
+            busy = avatarBusy,
+            onDismiss = { if (!avatarBusy) { source.recycle(); cropSource = null } },
+            onConfirm = { viewport, scale, offset ->
+                scope.launch {
+                    avatarBusy = true; avatarError = null
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val cropped = AvatarImage.cropSquare(source, viewport, scale, offset)
+                            try { AvatarImage.save(context, cropped, profile.avatarPath) }
+                            finally { cropped.recycle() }
+                        }
+                    }.onSuccess { path ->
+                        source.recycle(); cropSource = null; onAvatarChange(path)
+                    }.onFailure { avatarError = it.message ?: "头像保存失败" }
+                    avatarBusy = false
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
+private fun AvatarCropDialog(
+    source: android.graphics.Bitmap,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (IntSize, Float, Offset) -> Unit,
+) {
+    var scale by remember(source) { mutableFloatStateOf(1f) }
+    var offset by remember(source) { mutableStateOf(Offset.Zero) }
+    var viewport by remember(source) { mutableStateOf(IntSize.Zero) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("裁切头像") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp))
+                        .background(androidx.compose.ui.graphics.Color.Black)
+                        .onSizeChanged {
+                            viewport = it
+                            offset = AvatarImage.clampOffset(source, viewport, scale, offset)
+                        }
+                        .pointerInput(source, viewport) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val nextScale = (scale * zoom).coerceIn(1f, 8f)
+                                scale = nextScale
+                                offset = AvatarImage.clampOffset(source, viewport, nextScale, offset + pan)
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        source.asImageBitmap(), "头像裁切预览",
+                        Modifier.fillMaxSize().graphicsLayer {
+                            scaleX = scale; scaleY = scale
+                            translationX = offset.x; translationY = offset.y
+                        },
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                Text("拖动调整位置，双指缩放大小", style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(viewport, scale, offset) }, enabled = !busy && viewport.width > 0) {
+                Text(if (busy) "正在保存…" else "使用此裁切")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit, openMap: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(top = 16.dp)) {
-        Text("最近记录", style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("最近记录", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            FilledTonalButton(onClick = openMap) { Icon(Icons.Default.Map, null); Spacer(Modifier.width(8.dp)); Text("地图模式") }
+        }
         if (rows.isEmpty()) Text("还没有轨迹记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(rows, key = { it.id }) { row -> Card(modifier = Modifier.fillMaxWidth().clickable { edit(row) }) { Column(Modifier.fillMaxWidth().padding(14.dp)) {
@@ -564,12 +776,155 @@ private fun QrPage(db: PassportDb, qrs: List<PassportQr>, destinations: List<Des
 }
 
 @Composable
-private fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("粘贴旅行地点清单") },
-        text = { OutlinedTextField(text, { text = it }, label = { Text("每行一个地点") }, minLines = 5) },
-        confirmButton = { TextButton(onClick = { onImport(text) }) { Text("导入") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+private fun SmartImportDialog(
+    initialSource: ImportSource?,
+    existingNames: Set<String>,
+    onDismiss: () -> Unit,
+    onImport: (List<String>) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pasted by remember { mutableStateOf("") }
+    var extraction by remember { mutableStateOf<ImportExtraction?>(null) }
+    var candidates by remember { mutableStateOf<List<ImportCandidate>>(emptyList()) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var columnMenuExpanded by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<Job?>(null) }
+
+    fun applyExtraction(found: ImportExtraction) {
+        val normalizedExisting = existingNames.map { it.trim().lowercase() }.toSet()
+        extraction = found
+        candidates = found.candidates.map { item ->
+            item.copy(duplicate = item.duplicate || item.text.trim().lowercase() in normalizedExisting)
+        }
+        selected = candidates.filterNot { it.duplicate }.map { it.id }.toSet()
+        progress = if (candidates.isEmpty()) "没有识别到可导入项目" else "识别到 ${candidates.size} 项，请确认"
+    }
+
+    fun start(source: ImportSource) {
+        job?.cancel()
+        error = null
+        extraction = null
+        job = scope.launch {
+            runCatching { ImportEngine.extract(context, source) { progress = it } }
+                .onSuccess(::applyExtraction)
+                .onFailure { failure -> if (failure !is kotlinx.coroutines.CancellationException) error = failure.message ?: "解析失败" }
+            job = null
+        }
+    }
+
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+            start(ImportSource.Document(uri, context.contentResolver.getType(uri), name))
+        }
+    }
+    LaunchedEffect(initialSource) { initialSource?.let(::start) }
+
+    AlertDialog(
+        onDismissRequest = { job?.cancel(); onDismiss() },
+        title = { Text("智能导入清单") },
+        text = {
+            Column(Modifier.heightIn(max = 560.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (extraction == null) {
+                    OutlinedTextField(
+                        pasted, { pasted = it }, label = { Text("粘贴清单或公开网页链接") },
+                        minLines = 4, modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { start(ImportSource.Pasted(pasted)) }, enabled = pasted.isNotBlank() && job == null) { Text("解析粘贴内容") }
+                        OutlinedButton(onClick = {
+                            fileLauncher.launch(arrayOf(
+                                "text/*", "image/*", "application/pdf", "application/vnd.ms-excel",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            ))
+                        }, enabled = job == null) { Text("选择文件") }
+                    }
+                } else {
+                    val result = extraction!!
+                    if (result.tables.isNotEmpty()) {
+                        Text("已识别为表格", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Box {
+                            OutlinedButton(onClick = { columnMenuExpanded = true }) {
+                                Text("正在导入：${result.selectedColumn ?: "请选择列"}")
+                            }
+                            DropdownMenu(expanded = columnMenuExpanded, onDismissRequest = { columnMenuExpanded = false }) {
+                                result.availableColumns.forEach { column ->
+                                    DropdownMenuItem(
+                                        text = { Text(column) },
+                                        onClick = {
+                                            columnMenuExpanded = false
+                                            applyExtraction(ImportEngine.selectColumn(result, column))
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    result.notice?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                    }
+                    Text("可编辑、取消勾选或调整顺序；已有项默认不选。", style = MaterialTheme.typography.bodySmall)
+                    if (candidates.isEmpty()) {
+                        Text("当前列没有可导入内容，可切换其他列或关闭后重新选择来源。", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    LazyColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        itemsIndexed(candidates, key = { _, item -> item.id }) { index, item ->
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                                Column(Modifier.fillMaxWidth().padding(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(item.id in selected, onCheckedChange = { checked ->
+                                            selected = if (checked) selected + item.id else selected - item.id
+                                        })
+                                        OutlinedTextField(
+                                            item.text,
+                                            { value -> candidates = candidates.toMutableList().also { it[index] = item.copy(text = value) } },
+                                            modifier = Modifier.weight(1f), singleLine = true,
+                                        )
+                                        TextButton(onClick = {
+                                            candidates = candidates.toMutableList().also { it.removeAt(index) }
+                                            selected = selected - item.id
+                                        }) { Text("删除") }
+                                    }
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${item.source} · ${confidenceLabel(item.confidence)}${if (item.duplicate) " · 已存在" else ""}", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                                        TextButton(onClick = {
+                                            if (index > 0) candidates = candidates.toMutableList().also { val moved = it.removeAt(index); it.add(index - 1, moved) }
+                                        }, enabled = index > 0) { Text("↑") }
+                                        TextButton(onClick = {
+                                            if (index < candidates.lastIndex) candidates = candidates.toMutableList().also { val moved = it.removeAt(index); it.add(index + 1, moved) }
+                                        }, enabled = index < candidates.lastIndex) { Text("↓") }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (job != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(22.dp)); Text(progress, Modifier.padding(start = 8.dp))
+                    TextButton(onClick = { job?.cancel(); job = null; progress = "已取消" }) { Text("取消解析") }
+                } else if (progress.isNotBlank()) Text(progress, style = MaterialTheme.typography.bodySmall)
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onImport(candidates.filter { it.id in selected }.map { it.text.trim() }.filter(String::isNotEmpty)) },
+                enabled = selected.isNotEmpty() && job == null,
+            ) { Text("确认导入 ${selected.size} 项") }
+        },
+        dismissButton = { TextButton(onClick = { job?.cancel(); onDismiss() }) { Text("关闭") } },
+    )
+}
+
+private fun confidenceLabel(value: ImportConfidence) = when (value) {
+    ImportConfidence.HIGH -> "高置信度"
+    ImportConfidence.MEDIUM -> "中置信度"
+    ImportConfidence.LOW -> "低置信度"
 }
 @Composable
 private fun DestinationDialog(
@@ -643,9 +998,11 @@ private fun QrEditorDialog(
 @Composable
 private fun TrackEditorDialog(
     track: TrackPoint,
+    initialLink: String? = null,
     onDismiss: () -> Unit,
     onDelete: () -> Unit,
     onSave: (String, Double, Double) -> Unit,
+    onApplyPlace: (PlaceResolution) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -655,12 +1012,30 @@ private fun TrackEditorDialog(
     var query by remember(track.id) { mutableStateOf("") }
     var results by remember(track.id) { mutableStateOf<List<Address>>(emptyList()) }
     var message by remember(track.id) { mutableStateOf("") }
+    var linkText by remember(track.id, initialLink) { mutableStateOf(initialLink ?: track.originalUrl.orEmpty()) }
+    var linkPreview by remember(track.id) { mutableStateOf<PlaceResolution?>(null) }
+    var linkPreviewName by remember(track.id) { mutableStateOf("") }
+    var parsingLink by remember { mutableStateOf(false) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("编辑轨迹位置") },
         text = { Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text("位置名称") }, singleLine = true)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(latitude, { latitude = it }, label = { Text("纬度") }, modifier = Modifier.weight(1f), singleLine = true)
                 OutlinedTextField(longitude, { longitude = it }, label = { Text("经度") }, modifier = Modifier.weight(1f), singleLine = true)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    ExternalMapLauncher.openAmap(context, track.copy(
+                        name = name.ifBlank { track.name }, lat = latitude.toDoubleOrNull() ?: track.lat,
+                        lon = longitude.toDoubleOrNull() ?: track.lon,
+                    ))
+                }, modifier = Modifier.weight(1f)) { Text("高德查看") }
+                OutlinedButton(onClick = {
+                    ExternalMapLauncher.openGoogle(context, track.copy(
+                        name = name.ifBlank { track.name }, lat = latitude.toDoubleOrNull() ?: track.lat,
+                        lon = longitude.toDoubleOrNull() ?: track.lon,
+                    ))
+                }, modifier = Modifier.weight(1f)) { Text("Google 查看") }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(query, { query = it }, label = { Text("搜索地点") }, modifier = Modifier.weight(1f), singleLine = true)
@@ -690,6 +1065,50 @@ private fun TrackEditorDialog(
                 }
             }
             Text("搜索结果由 Android 系统 Geocoder 提供；也可以直接输入地图上选定的坐标。", style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(
+                linkText, { linkText = it; linkPreview = null; linkPreviewName = "" }, label = { Text("高德或 Google 地图分享链接") },
+                minLines = 2, modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(onClick = {
+                parsingLink = true
+                scope.launch {
+                    val result = runCatching {
+                        val original = PlaceLinkParser.firstUrl(linkText)
+                        val direct = PlaceLinkParser.parse(linkText)
+                        val expanded = if (
+                            original != null && PlaceLinkParser.needsRedirect(original) &&
+                            (direct?.provider == PlaceProvider.GOOGLE && direct.name.isNullOrBlank())
+                        ) {
+                            withContext(Dispatchers.IO) { PlaceRedirectResolver.expand(original) }
+                        } else null
+                        PlaceLinkParser.parse(linkText, expanded)?.takeIf { !it.name.isNullOrBlank() }
+                            ?: error("没有从分享内容中识别到场所名称")
+                    }
+                    parsingLink = false
+                    result.onSuccess {
+                        linkPreview = it
+                        linkPreviewName = it.name.orEmpty()
+                        message = "请核对场所名称；确认后只更新名称，不修改打卡坐标"
+                    }
+                        .onFailure { message = it.message ?: "链接解析失败" }
+                }
+            }, enabled = linkText.isNotBlank() && !parsingLink) { Text(if (parsingLink) "解析中…" else "解析链接") }
+            linkPreview?.let { preview ->
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedTextField(
+                            linkPreviewName, { linkPreviewName = it }, label = { Text("识别到的场所名称") },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        )
+                        Text("${providerLabel(preview.provider)} · 保留打卡坐标 ${track.lat}, ${track.lon}", style = MaterialTheme.typography.bodySmall)
+                        preview.canonicalUrl?.let { Text(it, style = MaterialTheme.typography.labelSmall, maxLines = 2) }
+                        Button(
+                            onClick = { onApplyPlace(preview.copy(name = linkPreviewName.trim())) },
+                            enabled = linkPreviewName.isNotBlank(),
+                        ) { Text("确认并更新场所名称") }
+                    }
+                }
+            }
         } },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -703,4 +1122,11 @@ private fun TrackEditorDialog(
                 }) { Text("保存") }
             }
         })
+}
+
+private fun providerLabel(provider: PlaceProvider) = when (provider) {
+    PlaceProvider.MANUAL -> "手动"
+    PlaceProvider.SYSTEM -> "系统地点"
+    PlaceProvider.AMAP -> "高德地图"
+    PlaceProvider.GOOGLE -> "Google Maps"
 }

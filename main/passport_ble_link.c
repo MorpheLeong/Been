@@ -4,6 +4,8 @@
 #include "esp_random.h"
 #include "nvs_flash.h"
 #include "passport_ble_ids.h"
+#include "passport_avatar.h"
+#include "passport_avatar_protocol.h"
 #include "passport_trip_store.h"
 #include "passport_display_policy.h"
 #include "freertos/FreeRTOS.h"
@@ -38,6 +40,7 @@ static const ble_uuid128_t SNAPSHOT_UUID = BLE_UUID128_INIT(PASSPORT_BLE_SNAPSHO
 static uint16_t s_request_value_handle;
 static passport_trip_model_t *s_trip_model;
 static passport_trip_rx_t s_trip_rx;
+static passport_avatar_rx_t s_avatar_rx;
 static volatile uint16_t s_connection = BLE_HS_CONN_HANDLE_NONE;
 static volatile bool s_request_subscribed;
 static volatile bool s_request_indications;
@@ -144,6 +147,22 @@ static int snapshot_access(uint16_t connection, uint16_t attribute,
         ble_hs_mbuf_to_flat(context->om, frame, sizeof(frame), &length) != 0)
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     if (length < 2) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (frame[1] >= PASSPORT_AVATAR_BEGIN_OPCODE &&
+        frame[1] <= PASSPORT_AVATAR_CLEAR_OPCODE) {
+        passport_avatar_action_t action;
+        if (!passport_avatar_sync_frame(&s_avatar_rx, frame, length, &action))
+            return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
+        if (action == PASSPORT_AVATAR_ACTION_COMMIT) {
+            if (passport_avatar_save(s_avatar_rx.payload) != ESP_OK)
+                return BLE_ATT_ERR_UNLIKELY;
+            notify_app(PASSPORT_BLE_AVATAR, NULL);
+        } else if (action == PASSPORT_AVATAR_ACTION_CLEAR) {
+            if (passport_avatar_clear() != ESP_OK)
+                return BLE_ATT_ERR_UNLIKELY;
+            notify_app(PASSPORT_BLE_AVATAR, NULL);
+        }
+        return 0;
+    }
     if (frame[1] == PASSPORT_SCREEN_SETTING_OPCODE) {
         uint16_t seconds;
         if (!passport_display_setting_decode(frame, length, &seconds))
@@ -505,6 +524,7 @@ void passport_ble_link_bind_trip_model(passport_trip_model_t *model)
 {
     s_trip_model = model;
     memset(&s_trip_rx, 0, sizeof(s_trip_rx));
+    memset(&s_avatar_rx, 0, sizeof(s_avatar_rx));
 }
 
 esp_err_t passport_ble_link_request_location(uint16_t request_id)

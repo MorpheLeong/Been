@@ -20,6 +20,11 @@ internal object PassportProtocol {
     const val SNAPSHOT_COMMIT = 0x12
     const val SCREEN_TIMEOUT = 0x13
     const val TIME_SYNC = 0x14
+    const val AVATAR_BEGIN = 0x15
+    const val AVATAR_CHUNK = 0x16
+    const val AVATAR_COMMIT = 0x17
+    const val AVATAR_CLEAR = 0x18
+    const val AVATAR_FORMAT_RGB565_LE = 1
     const val CHECK_IN_FRAGMENT = 0x42
 
     data class CheckIn(val request: Int, val opcode: Int, val destinationId: String, val name: String)
@@ -114,6 +119,29 @@ internal object PassportProtocol {
         }
         out += ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).put(VERSION.toByte()).put(SNAPSHOT_COMMIT.toByte())
             .putShort(revision.toShort()).array()
+        return out
+    }
+
+    /** Avatar is transferred independently so older trip snapshots stay binary-compatible. */
+    fun avatarFrames(rgb565: ByteArray?, chunkPayload: Int = 16): List<ByteArray> {
+        if (rgb565 == null) return listOf(byteArrayOf(VERSION.toByte(), AVATAR_CLEAR.toByte()))
+        require(rgb565.size == AvatarImage.DEVICE_BYTES && chunkPayload in 1..240)
+        val out = mutableListOf<ByteArray>()
+        val crc = CRC32().apply { update(rgb565) }.value.toInt()
+        out += ByteBuffer.allocate(11).order(ByteOrder.LITTLE_ENDIAN)
+            .put(VERSION.toByte()).put(AVATAR_BEGIN.toByte())
+            .put(AVATAR_FORMAT_RGB565_LE.toByte())
+            .put(AvatarImage.DEVICE_SIZE.toByte()).put(AvatarImage.DEVICE_SIZE.toByte())
+            .putShort(rgb565.size.toShort()).putInt(crc).array()
+        var offset = 0
+        while (offset < rgb565.size) {
+            val length = minOf(chunkPayload, rgb565.size - offset)
+            out += ByteBuffer.allocate(4 + length).order(ByteOrder.LITTLE_ENDIAN)
+                .put(VERSION.toByte()).put(AVATAR_CHUNK.toByte()).putShort(offset.toShort())
+                .put(rgb565, offset, length).array()
+            offset += length
+        }
+        out += byteArrayOf(VERSION.toByte(), AVATAR_COMMIT.toByte())
         return out
     }
 

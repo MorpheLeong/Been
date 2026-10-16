@@ -6,15 +6,35 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.UUID
 
-data class TrackPoint(val id: Long, val requestId: String, val destinationId: String?, val name: String, val lat: Double, val lon: Double, val time: Long, val accuracy: Float)
+data class TrackPoint(
+    val id: Long,
+    val requestId: String,
+    val destinationId: String?,
+    val name: String,
+    val lat: Double,
+    val lon: Double,
+    val time: Long,
+    val accuracy: Float,
+    val provider: PlaceProvider = PlaceProvider.MANUAL,
+    val address: String? = null,
+    val placeId: String? = null,
+    val originalUrl: String? = null,
+    val canonicalUrl: String? = null,
+    val resolutionState: PlaceResolutionState = PlaceResolutionState.MANUAL_CONFIRMATION,
+)
 data class Destination(val id: String, val name: String, val order: Int, val done: Boolean, val qrId: String?)
 data class PassportQr(val id: String, val name: String, val payload: String, val starred: Boolean)
-data class PassportProfile(val nickname: String = "", val bio: String = "", val socialIds: List<String> = emptyList())
+data class PassportProfile(
+    val nickname: String = "",
+    val bio: String = "",
+    val socialIds: List<String> = emptyList(),
+    val avatarPath: String? = null,
+)
 
 /** Local-only store: QR payloads and precise coordinates are never uploaded to Passport. */
-class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", null, 3) {
+class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", null, 5) {
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE tracks(id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, destination_id TEXT, name TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, time INTEGER NOT NULL, accuracy REAL NOT NULL)")
+        db.execSQL("CREATE TABLE tracks(id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, destination_id TEXT, name TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, time INTEGER NOT NULL, accuracy REAL NOT NULL, provider TEXT NOT NULL DEFAULT 'MANUAL', address TEXT, place_id TEXT, original_url TEXT, canonical_url TEXT, resolution_state TEXT NOT NULL DEFAULT 'MANUAL_CONFIRMATION')")
         db.execSQL("CREATE TABLE destinations(id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0, qr_id TEXT)")
         db.execSQL("CREATE TABLE qrs(id TEXT PRIMARY KEY, name TEXT NOT NULL, payload TEXT NOT NULL, starred INTEGER NOT NULL DEFAULT 0)")
         createSettingsTables(db)
@@ -28,28 +48,47 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
             found
         }
         if (!hasTimeout) db.execSQL("ALTER TABLE device_settings ADD COLUMN screen_timeout_seconds INTEGER NOT NULL DEFAULT 60")
+        if (oldVersion < 4) {
+            val existing = db.rawQuery("PRAGMA table_info(tracks)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) }
+            }
+            fun add(name: String, sql: String) { if (name !in existing) db.execSQL(sql) }
+            add("provider", "ALTER TABLE tracks ADD COLUMN provider TEXT NOT NULL DEFAULT 'MANUAL'")
+            add("address", "ALTER TABLE tracks ADD COLUMN address TEXT")
+            add("place_id", "ALTER TABLE tracks ADD COLUMN place_id TEXT")
+            add("original_url", "ALTER TABLE tracks ADD COLUMN original_url TEXT")
+            add("canonical_url", "ALTER TABLE tracks ADD COLUMN canonical_url TEXT")
+            add("resolution_state", "ALTER TABLE tracks ADD COLUMN resolution_state TEXT NOT NULL DEFAULT 'MANUAL_CONFIRMATION'")
+        }
+        val profileColumns = db.rawQuery("PRAGMA table_info(profile)", null).use { c ->
+            buildSet { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) }
+        }
+        if ("avatar_path" !in profileColumns) db.execSQL("ALTER TABLE profile ADD COLUMN avatar_path TEXT")
     }
 
     private fun createSettingsTables(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE IF NOT EXISTS profile(id INTEGER PRIMARY KEY CHECK(id=1), nickname TEXT NOT NULL DEFAULT '', bio TEXT NOT NULL DEFAULT '', social_ids TEXT NOT NULL DEFAULT '')")
+        db.execSQL("CREATE TABLE IF NOT EXISTS profile(id INTEGER PRIMARY KEY CHECK(id=1), nickname TEXT NOT NULL DEFAULT '', bio TEXT NOT NULL DEFAULT '', social_ids TEXT NOT NULL DEFAULT '', avatar_path TEXT)")
         db.execSQL("INSERT OR IGNORE INTO profile(id,nickname,bio,social_ids) VALUES(1,'','','')")
         db.execSQL("CREATE TABLE IF NOT EXISTS device_settings(id INTEGER PRIMARY KEY CHECK(id=1), sound_volume INTEGER NOT NULL DEFAULT 50, screen_timeout_seconds INTEGER NOT NULL DEFAULT 60)")
         db.execSQL("INSERT OR IGNORE INTO device_settings(id,sound_volume) VALUES(1,50)")
     }
 
     @Synchronized fun profile(): PassportProfile = readableDatabase.rawQuery(
-        "SELECT nickname,bio,social_ids FROM profile WHERE id=1", null
+        "SELECT nickname,bio,social_ids,avatar_path FROM profile WHERE id=1", null
     ).use { c ->
         if (!c.moveToFirst()) PassportProfile() else PassportProfile(
-            c.getString(0), c.getString(1), c.getString(2).lineSequence().filter(String::isNotBlank).take(4).toList()
+            c.getString(0), c.getString(1), c.getString(2).lineSequence().filter(String::isNotBlank).take(4).toList(), c.getString(3)
         )
     }
     @Synchronized fun saveProfile(value: PassportProfile) {
         val nickname = truncateUtf8(value.nickname.trim(), 48)
         val bio = truncateUtf8(value.bio.trim(), 96)
         val social = value.socialIds.map { truncateUtf8(it.trim(), 48) }.filter(String::isNotEmpty).take(4)
-        writableDatabase.execSQL("UPDATE profile SET nickname=?,bio=?,social_ids=? WHERE id=1",
-            arrayOf(nickname, bio, social.joinToString("\n")))
+        writableDatabase.execSQL("UPDATE profile SET nickname=?,bio=?,social_ids=?,avatar_path=? WHERE id=1",
+            arrayOf(nickname, bio, social.joinToString("\n"), value.avatarPath))
+    }
+    @Synchronized fun setAvatarPath(path: String?) {
+        writableDatabase.execSQL("UPDATE profile SET avatar_path=? WHERE id=1", arrayOf(path))
     }
     @Synchronized fun soundVolume(): Int = readableDatabase.rawQuery(
         "SELECT sound_volume FROM device_settings WHERE id=1", null
@@ -71,20 +110,53 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
     @Synchronized fun qrs(): List<PassportQr> = readableDatabase.rawQuery("SELECT id,name,payload,starred FROM qrs ORDER BY name COLLATE NOCASE", null).use { c ->
         buildList { while (c.moveToNext()) add(PassportQr(c.getString(0), c.getString(1), c.getString(2), c.getInt(3) != 0)) }
     }
-    @Synchronized fun tracks(): List<TrackPoint> = readableDatabase.rawQuery("SELECT id,request_id,destination_id,name,lat,lon,time,accuracy FROM tracks ORDER BY time DESC LIMIT 300", null).use { c ->
-        buildList { while (c.moveToNext()) add(TrackPoint(c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getDouble(4), c.getDouble(5), c.getLong(6), c.getFloat(7))) }
+    @Synchronized fun tracks(): List<TrackPoint> = readableDatabase.rawQuery("SELECT id,request_id,destination_id,name,lat,lon,time,accuracy,provider,address,place_id,original_url,canonical_url,resolution_state FROM tracks ORDER BY time DESC LIMIT 300", null).use { c ->
+        buildList { while (c.moveToNext()) add(TrackPoint(
+            c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getDouble(4), c.getDouble(5),
+            c.getLong(6), c.getFloat(7), enumOrDefault(c.getString(8), PlaceProvider.MANUAL), c.getString(9),
+            c.getString(10), c.getString(11), c.getString(12),
+            enumOrDefault(c.getString(13), PlaceResolutionState.MANUAL_CONFIRMATION)
+        )) }
     }
     @Synchronized fun hasTrack(requestId: String): Boolean = readableDatabase.rawQuery("SELECT 1 FROM tracks WHERE request_id=?", arrayOf(requestId)).use { it.moveToFirst() }
     @Synchronized fun updateTrack(id: Long, name: String, lat: Double, lon: Double) {
         require(name.trim().isNotEmpty() && lat in -90.0..90.0 && lon in -180.0..180.0)
-        writableDatabase.execSQL("UPDATE tracks SET name=?,lat=?,lon=? WHERE id=?",
-            arrayOf(name.trim().take(100), lat, lon, id))
+        writableDatabase.execSQL(
+            "UPDATE tracks SET name=?,lat=?,lon=?,provider=?,resolution_state=?,address=NULL,place_id=NULL,original_url=NULL,canonical_url=NULL WHERE id=?",
+            arrayOf<Any>(name.trim().take(100), lat, lon, PlaceProvider.MANUAL.name, PlaceResolutionState.MANUAL_CONFIRMATION.name, id)
+        )
+    }
+    @Synchronized fun updateTrackPlace(id: Long, value: PlaceResolution) {
+        val cleanName = truncateUtf8(value.name?.trim().orEmpty(), 100)
+        require(cleanName.isNotEmpty())
+        writableDatabase.execSQL(
+            "UPDATE tracks SET name=?,provider=?,address=?,place_id=?,original_url=?,canonical_url=?,resolution_state=? WHERE id=?",
+            arrayOf<Any?>(cleanName, value.provider.name, value.address, value.placeId, value.originalUrl,
+                value.canonicalUrl, value.state.name, id)
+        )
+    }
+    @Synchronized fun enrichTrackFromSystem(id: Long, name: String, address: String?) {
+        val clean = truncateUtf8(name.trim(), 100)
+        if (clean.isEmpty()) return
+        writableDatabase.execSQL(
+            "UPDATE tracks SET name=?,address=?,provider=?,resolution_state=? WHERE id=? AND provider IN ('MANUAL','SYSTEM')",
+            arrayOf<Any?>(clean, address, PlaceProvider.SYSTEM.name, PlaceResolutionState.PARTIAL.name, id)
+        )
+    }
+    @Synchronized fun enrichTrackFromSystem(requestId: String, name: String, address: String?) {
+        val clean = truncateUtf8(name.trim(), 100)
+        if (clean.isEmpty()) return
+        writableDatabase.execSQL(
+            "UPDATE tracks SET name=?,address=?,provider=?,resolution_state=? WHERE request_id=? AND provider IN ('MANUAL','SYSTEM')",
+            arrayOf<Any?>(clean, address, PlaceProvider.SYSTEM.name, PlaceResolutionState.PARTIAL.name, requestId)
+        )
     }
     @Synchronized fun deleteTrack(id: Long) { writableDatabase.delete("tracks", "id=?", arrayOf(id.toString())) }
     @Synchronized fun saveTrackOnce(requestId: String, destinationId: String?, name: String, lat: Double, lon: Double, time: Long, accuracy: Float): Boolean {
         val values = ContentValues().apply {
             put("request_id", requestId); put("destination_id", destinationId); put("name", name)
             put("lat", lat); put("lon", lon); put("time", time); put("accuracy", accuracy)
+            put("provider", PlaceProvider.SYSTEM.name); put("resolution_state", PlaceResolutionState.PARTIAL.name)
         }
         return writableDatabase.insertWithOnConflict("tracks", null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1L
     }
@@ -93,6 +165,22 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
         if (destinations().size >= 64) error("Passport 单次最多同步 64 个目的地")
         val values = ContentValues().apply { put("id", UUID.randomUUID().toString()); put("name", clean); put("sort_order", destinations().size) }
         writableDatabase.insert("destinations", null, values)
+    }
+    @Synchronized fun addDestinations(names: List<String>): Int {
+        val existing = destinations()
+        val capacity = (64 - existing.size).coerceAtLeast(0)
+        val clean = names.map { truncateUtf8(it.trim(), 47) }.filter(String::isNotEmpty).take(capacity)
+        writableDatabase.beginTransaction()
+        return try {
+            clean.forEachIndexed { index, name ->
+                val values = ContentValues().apply {
+                    put("id", UUID.randomUUID().toString()); put("name", name); put("sort_order", existing.size + index)
+                }
+                writableDatabase.insertOrThrow("destinations", null, values)
+            }
+            writableDatabase.setTransactionSuccessful()
+            clean.size
+        } finally { writableDatabase.endTransaction() }
     }
     @Synchronized fun deleteDestination(id: String) { writableDatabase.delete("destinations", "id=?", arrayOf(id)); normalizeOrder() }
     @Synchronized fun updateDestination(id: String, name: String) {
@@ -104,7 +192,7 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
         val list = destinations().toMutableList(); if (from !in list.indices || to !in list.indices || from == to) return
         val moved = list.removeAt(from); list.add(to, moved)
         writableDatabase.beginTransaction(); try {
-            list.forEachIndexed { index, item -> writableDatabase.execSQL("UPDATE destinations SET sort_order=? WHERE id=?", arrayOf(index, item.id)) }
+            list.forEachIndexed { index, item -> writableDatabase.execSQL("UPDATE destinations SET sort_order=? WHERE id=?", arrayOf<Any>(index, item.id)) }
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
     }
@@ -134,10 +222,10 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
     }
     @Synchronized fun markDestinationDone(id: String) = setDestinationDone(id, true)
     @Synchronized fun setDestinationDone(id: String, done: Boolean) {
-        writableDatabase.execSQL("UPDATE destinations SET done=? WHERE id=?", arrayOf(if (done) 1 else 0, id))
+        writableDatabase.execSQL("UPDATE destinations SET done=? WHERE id=?", arrayOf<Any>(if (done) 1 else 0, id))
     }
     private fun normalizeOrder() {
-        destinations().forEachIndexed { index, item -> writableDatabase.execSQL("UPDATE destinations SET sort_order=? WHERE id=?", arrayOf(index, item.id)) }
+        destinations().forEachIndexed { index, item -> writableDatabase.execSQL("UPDATE destinations SET sort_order=? WHERE id=?", arrayOf<Any>(index, item.id)) }
     }
     internal fun truncateUtf8(value: String, maxBytes: Int): String {
         val out = StringBuilder(); var bytes = 0
@@ -147,4 +235,7 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
         }
         return out.toString().trim()
     }
+
+    private inline fun <reified T : Enum<T>> enumOrDefault(value: String?, fallback: T): T =
+        enumValues<T>().firstOrNull { it.name == value } ?: fallback
 }

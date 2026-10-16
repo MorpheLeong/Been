@@ -2,6 +2,7 @@ package com.folotoy.passport
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.zip.CRC32
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -47,6 +48,34 @@ class PassportProtocolTest {
             byteArrayOf(3, 0x14, 0x00, 0x5A, 0xC5.toByte(), 0x6A, 0x20, 0xFE.toByte()),
             PassportProtocol.timeSyncFrame(1_791_318_528_000L, -480),
         )
+    }
+
+    @Test fun createsAvatarFramesWithOffsetsAndCrc() {
+        val pixels = ByteArray(AvatarImage.DEVICE_BYTES) { (it * 13).toByte() }
+        val frames = PassportProtocol.avatarFrames(pixels, 16)
+        assertEquals(11, frames.first().size)
+        assertEquals(PassportProtocol.AVATAR_BEGIN, frames.first()[1].toInt() and 0xff)
+        assertEquals(AvatarImage.DEVICE_SIZE, frames.first()[3].toInt() and 0xff)
+        assertEquals(AvatarImage.DEVICE_SIZE, frames.first()[4].toInt() and 0xff)
+        val header = ByteBuffer.wrap(frames.first()).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(AvatarImage.DEVICE_BYTES, header.getShort(5).toInt() and 0xffff)
+        assertEquals(CRC32().apply { update(pixels) }.value.toInt(), header.getInt(7))
+        assertTrue(frames.drop(1).dropLast(1).all { it.size <= 20 })
+        assertEquals(listOf(0, 16, 32), frames.drop(1).dropLast(1).take(3).map {
+            ByteBuffer.wrap(it).order(ByteOrder.LITTLE_ENDIAN).getShort(2).toInt() and 0xffff
+        })
+        assertEquals(PassportProtocol.AVATAR_COMMIT, frames.last()[1].toInt() and 0xff)
+        assertArrayEquals(
+            byteArrayOf(PassportProtocol.VERSION.toByte(), PassportProtocol.AVATAR_CLEAR.toByte()),
+            PassportProtocol.avatarFrames(null).single(),
+        )
+    }
+
+    @Test fun convertsRgb888ToDeviceRgb565() {
+        assertEquals(0xf800, AvatarImage.rgb888ToRgb565(255, 0, 0))
+        assertEquals(0x07e0, AvatarImage.rgb888ToRgb565(0, 255, 0))
+        assertEquals(0x001f, AvatarImage.rgb888ToRgb565(0, 0, 255))
+        assertEquals(0xffff, AvatarImage.rgb888ToRgb565(255, 255, 255))
     }
 
     @Test fun reassemblesFragmentsAndRejectsMalformedSequences() {
