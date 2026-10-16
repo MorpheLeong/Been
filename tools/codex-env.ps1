@@ -107,6 +107,7 @@ function Enable-EspIdfEnvironment {
     Write-Host "  Python: $idfPython"
     Write-Host "  version: $idfVersion"
     Write-Host "  target: esp32c3 (RISC-V)"
+    Write-Host "  firmware gate: .\tools\validate-firmware.ps1"
 }
 
 if ($MyInvocation.InvocationName -ne ".") {

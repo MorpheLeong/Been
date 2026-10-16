@@ -30,6 +30,8 @@ CONFIG_LV_MEM_SIZE=24576
 
 # --- 系统 ---
 CONFIG_FREERTOS_HZ=1000
+# ADC 按键 10 ms 轮询足以覆盖快速人工连按；相比组件默认 5 ms 减半空闲采样。
+CONFIG_BUTTON_PERIOD_TIME_MS=10
 # 只启用动态频率调节：空闲时降到 40 MHz，有负载时恢复 160 MHz。
 # 不启用 tickless idle，产品 BLE 与按键任务始终保持正常运行语义。
 CONFIG_PM_ENABLE=y

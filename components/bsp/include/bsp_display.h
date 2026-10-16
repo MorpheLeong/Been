@@ -33,9 +33,12 @@ void bsp_display_backlight(uint8_t percent);
 // 调用方必须先阻止 LVGL flush；成功后可用 bsp_display_wake() 恢复。
 esp_err_t bsp_display_sleep(void);
 
-// 从日常息屏恢复 ST7789。成功后面板已开启，但背光仍保持关闭，调用方应在
-// LVGL 恢复并请求整屏刷新后再设置所需亮度。
+// 从日常息屏恢复 ST7789。成功后面板接受显存写入，但仍保持 Display Off 和
+// 背光关闭；调用方应在 LVGL 完成整屏刷新后调用 bsp_display_show()。
 esp_err_t bsp_display_wake(void);
+
+// 显示已经写好的首帧。与 bsp_display_wake() 分离，避免先开屏再刷新造成白闪。
+esp_err_t bsp_display_show(void);
 
 // deep sleep 专用：关闭显示、让 ST7789 进入 Sleep In，停止背光 PWM，
 // 将 CS/SCLK/MOSI/DC/背光设为安全电平并在 deep sleep 中保持。调用时必须

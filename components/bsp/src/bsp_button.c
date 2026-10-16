@@ -8,6 +8,7 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <string.h>
 
 static const char *TAG = "bsp_btn";
 
@@ -33,6 +34,7 @@ typedef struct {
     unsigned index;
 } bsp_adc_button_t;
 static bsp_adc_button_t s_drivers[BSP_BTN_COUNT];
+static bool s_long_fired[BSP_BTN_COUNT];
 static int64_t s_sample_time;
 static int s_sample_mv = -1;
 static bool s_sample_valid;
@@ -75,10 +77,23 @@ static void on_event(void *arg, void *usr_data, bsp_btn_ev_t ev) {
     if (!s_ready || !s_cb) return;
     s_cb((bsp_btn_t)(intptr_t)usr_data, ev, s_user);
 }
-static void cb_press (void *a, void *u) { on_event(a, u, BSP_BTN_PRESS);  }
-static void cb_click (void *a, void *u) { on_event(a, u, BSP_BTN_CLICK);  }
-static void cb_double(void *a, void *u) { on_event(a, u, BSP_BTN_DOUBLE); }
-static void cb_long  (void *a, void *u) { on_event(a, u, BSP_BTN_LONG);   }
+static void cb_press(void *a, void *u) {
+    const unsigned index = (unsigned)(uintptr_t)u;
+    if (index < BSP_BTN_COUNT) s_long_fired[index] = false;
+    on_event(a, u, BSP_BTN_PRESS);
+}
+
+static void cb_release(void *a, void *u) {
+    const unsigned index = (unsigned)(uintptr_t)u;
+    if (index < BSP_BTN_COUNT && !s_long_fired[index])
+        on_event(a, u, BSP_BTN_CLICK);
+}
+
+static void cb_long(void *a, void *u) {
+    const unsigned index = (unsigned)(uintptr_t)u;
+    if (index < BSP_BTN_COUNT) s_long_fired[index] = true;
+    on_event(a, u, BSP_BTN_LONG);
+}
 
 // 初始化中途失败时先停掉所有 button driver，再释放本文件持有的校准与 ADC unit。
 // button driver 仍在轮询时不能先删 ADC，否则 timer callback 会访问失效句柄。
@@ -87,6 +102,7 @@ static void button_cleanup(void) {
     s_user = NULL;
     s_ready = false;
     s_sample_valid = false;
+    memset(s_long_fired, 0, sizeof(s_long_fired));
 
     for (int i = BSP_BTN_COUNT - 1; i >= 0; i--) {
         if (!s_btn[i]) continue;
@@ -117,8 +133,7 @@ static void button_cleanup(void) {
 
 static esp_err_t register_callbacks(button_handle_t button, void *index) {
     esp_err_t e = iot_button_register_cb(button, BUTTON_PRESS_DOWN, NULL, cb_press, index);
-    if (e == ESP_OK) e = iot_button_register_cb(button, BUTTON_SINGLE_CLICK, NULL, cb_click, index);
-    if (e == ESP_OK) e = iot_button_register_cb(button, BUTTON_DOUBLE_CLICK, NULL, cb_double, index);
+    if (e == ESP_OK) e = iot_button_register_cb(button, BUTTON_PRESS_UP, NULL, cb_release, index);
     if (e == ESP_OK) e = iot_button_register_cb(button, BUTTON_LONG_PRESS_START, NULL, cb_long, index);
     return e;
 }
@@ -199,6 +214,7 @@ esp_err_t bsp_button_init(bsp_btn_cb_t cb, void *user) {
     }
 
     s_sample_valid = false;
+    memset(s_long_fired, 0, sizeof(s_long_fired));
     s_ready = true;
     ESP_LOGI(TAG, "按键就绪:ADC1_CH%d 三键分压,短按 %dms 长按 %dms",
              BSP_BTN_ADC_CHANNEL, BSP_BTN_SHORT_PRESS_MS, BSP_BTN_LONG_PRESS_MS);

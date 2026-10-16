@@ -126,7 +126,8 @@ record only when an environment fact or command is needed:
 - Python: `C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe`
 - Entry for every new PowerShell process:
   `. .\tools\codex-env.ps1 -Scope EspIdf`.
-- Standard build: `idf.py build`. Discover the current serial port with
+- Standard build: `idf.py build`. Native-Windows firmware delivery gate:
+  `.\tools\validate-firmware.ps1`. Discover the current serial port with
   `python -m serial.tools.list_ports -v`; never reuse a recorded COM number.
 - Flashing/monitoring still requires the normal explicit authorization. See
   `docs/CODEX_ENV.md` for commands and image offsets.
@@ -145,6 +146,7 @@ Pop-Location
 # ESP-IDF
 idf.py --version
 idf.py build
+.\tools\validate-firmware.ps1
 ```
 
 ### Agent startup policy
@@ -177,6 +179,12 @@ idf.py build
   because multiple output records are dot-sourced. Use `tools/codex-env.ps1`.
 - Running activation only inside a child PowerShell does not prepare its parent;
   dot-source the project entry in the shell that will build.
+- Do not run the firmware gate through Git Bash/MSYS/MinGW on this host; ESP-IDF
+  v5.5.3 rejects it. Use native PowerShell `tools\validate-firmware.ps1`.
+- A managed sandbox can cause activation error 623. Retry the same native command
+  outside the sandbox once; if it still fails, stop and report the concrete error.
+- Native Windows has no compatible `cc` for the Bash static gate. Use the native
+  repository check and Android gate locally; use CI/POSIX for host-C tests.
 - Do not create another ESP-IDF Python venv, use system Gradle, select Xtensa for
   ESP32-C3, hard-code a COM port/device serial, flash an app-only image at `0x0`,
   or erase all flash as a routine fix.

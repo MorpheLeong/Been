@@ -29,6 +29,7 @@
 
 #define INPUT_QUEUE_DEPTH 24
 #define SOUND_QUEUE_DEPTH 4
+#define INPUT_TASK_STACK_SIZE 4096
 #define SOUND_IDLE_SLEEP_MS 250
 #define PASSPORT_BACKLIGHT_PERCENT 60
 #define C_BG 0x050B0A
@@ -233,6 +234,25 @@ static bool display_sleep(void)
     return true;
 }
 
+static void display_wake_render_cb(void *user_data)
+{
+    (void)user_data;
+    if (s_screen != NULL) {
+        lv_obj_invalidate(s_screen);
+        lv_refr_now(s_lv_display);
+    }
+    const esp_err_t err = bsp_display_show();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "亮屏首帧显示失败: %s", esp_err_to_name(err));
+        (void)bsp_lvgl_stop();
+        (void)bsp_display_sleep();
+        s_display_sleeping = true;
+        return;
+    }
+    bsp_display_backlight(PASSPORT_BACKLIGHT_PERCENT);
+    log_memory("display-wake-lvgl");
+}
+
 static bool display_wake(void)
 {
     if (!s_display_sleeping) {
@@ -242,10 +262,11 @@ static bool display_wake(void)
     if (!bsp_lvgl_lock(500)) return false;
     esp_err_t err = bsp_display_wake();
     if (err == ESP_OK) err = bsp_lvgl_resume();
-    if (err == ESP_OK && s_screen != NULL) {
-        lv_obj_invalidate(s_screen);
-        lv_refr_now(s_lv_display);
-    }
+    // Run the full redraw on LVGL's own task. Keeping it on passport_input
+    // requires another ~2 KB of permanent stack, which fragments the small
+    // internal heap enough to prevent atomic snapshot commits.
+    if (err == ESP_OK && lv_async_call(display_wake_render_cb, NULL) != LV_RESULT_OK)
+        err = ESP_ERR_NO_MEM;
     if (err != ESP_OK) {
         (void)bsp_lvgl_stop();
         (void)bsp_display_sleep();
@@ -256,7 +277,6 @@ static bool display_wake(void)
         return false;
     }
     s_display_sleeping = false;
-    bsp_display_backlight(PASSPORT_BACKLIGHT_PERCENT);
     return true;
 }
 
@@ -1292,7 +1312,8 @@ void app_main(void)
 
     s_queue = xQueueCreate(INPUT_QUEUE_DEPTH, sizeof(app_event_t));
     s_sound_queue = xQueueCreate(SOUND_QUEUE_DEPTH, sizeof(sound_cue_t));
-    if (s_queue == NULL || xTaskCreate(input_task, "passport_input", 4096, NULL, 5, NULL) != pdPASS) {
+    if (s_queue == NULL || xTaskCreate(input_task, "passport_input", INPUT_TASK_STACK_SIZE,
+                                       NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Input task/queue creation failed");
         return;
     }

@@ -190,6 +190,8 @@ static int snapshot_access(uint16_t connection, uint16_t attribute,
     if (committing) {
         candidate = heap_caps_malloc(sizeof(*candidate), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (candidate == NULL) {
+            ESP_LOGE(TAG, "snapshot candidate allocation failed bytes=%u",
+                     (unsigned)sizeof(*candidate));
             log_memory("snapshot-candidate-failed");
             return BLE_ATT_ERR_INSUFFICIENT_RES;
         }

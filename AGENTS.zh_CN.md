@@ -119,7 +119,8 @@ Unverified: 仍需板卡、仪器或用户确认的事项
 - Python：`C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe`
 - 每个新 PowerShell process 的入口：
   `. .\tools\codex-env.ps1 -Scope EspIdf`。
-- 标准构建：`idf.py build`。用 `python -m serial.tools.list_ports -v` 获取
+- 标准构建：`idf.py build`。本机 Windows 固件交付门禁：
+  `.\tools\validate-firmware.ps1`。用 `python -m serial.tools.list_ports -v` 获取
   当前串口，绝不能复用以前记录的 COM 号。
 - 烧录/monitor 仍须按常规取得明确授权。命令和镜像 offset 见
   `docs/CODEX_ENV.zh_CN.md`。
@@ -138,6 +139,7 @@ Pop-Location
 # ESP-IDF
 idf.py --version
 idf.py build
+.\tools\validate-firmware.ps1
 ```
 
 ### Agent 启动策略
@@ -165,6 +167,12 @@ idf.py build
   dot-source 并失败；使用 `tools/codex-env.ps1`。
 - 只在子 PowerShell 中激活不会准备父 shell；必须在即将构建的 shell 中
   dot-source 项目入口。
+- 本机不得通过 Git Bash/MSYS/MinGW 跑固件门禁；ESP-IDF v5.5.3 会拒绝该环境。
+  使用原生 PowerShell `tools\validate-firmware.ps1`。
+- managed sandbox 可能触发激活 error 623。只在 sandbox 外用同一原生命令重试
+  一次；仍失败就停止并报告具体错误。
+- 本机 Windows 没有适配 Bash static gate 的 `cc`。本地执行原生仓库检查与
+  Android 门禁；host-C tests 使用 CI/POSIX。
 - 不得另建 ESP-IDF Python venv、使用系统 Gradle、为 ESP32-C3 选择 Xtensa、
   硬编码 COM 号/设备 serial、把 app-only 镜像烧到 `0x0`，或把全片擦除当作
   常规修复方法。

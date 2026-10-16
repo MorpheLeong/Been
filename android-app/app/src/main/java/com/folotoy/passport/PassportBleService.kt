@@ -77,9 +77,9 @@ class PassportBleService : Service() {
     private val reconnect = Runnable { if (!stopping && reconnectAllowed) connectOrScan() }
     private val connectionTimeout = Runnable {
         if (gatt == null || ready) return@Runnable
-        reconnectAllowed = false
         closeConnection()
-        broadcast(STATE, "连接超时，请点连接后重试")
+        broadcast(STATE, "连接超时，切换到后台重连")
+        scheduleReconnect()
     }
 
     override fun onCreate() {
@@ -114,11 +114,19 @@ class PassportBleService : Service() {
                 if (ready) syncSnapshot() else connectOrScan()
             }
             else -> {
-                // A killed service must never restart into an unsolicited pairing prompt.
-                stopSelf(startId)
+                // START_STICKY restarts only a service the user previously started. We
+                // connect exclusively to an already bonded Passport, so this cannot
+                // create an unsolicited pairing prompt after process recreation. Use a
+                // bounded direct connection here: some Android vendors leave
+                // autoConnect GATT requests suspended indefinitely while the phone is
+                // locked, which also prevents our retry loop from making progress.
+                stopping = false
+                reconnectAllowed = true
+                startForeground(NOTIFICATION_ID, notification("正在后台恢复 Passport 连接"))
+                connectOrScan()
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
@@ -139,6 +147,16 @@ class PassportBleService : Service() {
         val adapter = getSystemService(BluetoothManager::class.java)?.adapter
         if (adapter == null || !adapter.isEnabled) { broadcast(STATE, "请开启蓝牙"); scheduleReconnect(); return }
         if (scanning || gatt != null) return
+        val bondedPassport = try {
+            adapter.bondedDevices.firstOrNull { it.name == DEVICE_NAME }
+        } catch (_: SecurityException) {
+            broadcast(STATE, "蓝牙连接权限被撤销")
+            return
+        }
+        if (bondedPassport != null) {
+            connectDevice(bondedPassport, "正在连接 Passport")
+            return
+        }
         val scanner = adapter.bluetoothLeScanner ?: run { scheduleReconnect(); return }
         scanning = true
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build()
@@ -215,11 +233,11 @@ class PassportBleService : Service() {
                     return
                 }
                 Log.w(TAG, "GATT disconnected status=$status state=$newState")
-                gatt = null
                 ready = false; commandAssembler.reset()
+                serviceDiscoveryStarted = false
+                gatt = null
                 try { g.close() }
                 catch (_: SecurityException) { broadcast(STATE, "蓝牙连接权限被撤销") }
-                serviceDiscoveryStarted = false
                 if (reconnectAllowed) {
                     broadcast(STATE, "Passport 已断开，准备重连")
                     scheduleReconnect()
@@ -683,14 +701,13 @@ class PassportBleService : Service() {
 
     private fun scheduleReconnect() {
         if (!reconnectAllowed || stopping || gatt != null || scanning) return
-        if (reconnects >= MAX_RECONNECTS) {
-            reconnectAllowed = false
-            broadcast(STATE, "连接失败，请点连接重试")
-            return
-        }
-        reconnects++
+        // Issue the first reconnect before vendor background-freeze policies can
+        // suspend this process. Later failures still back off to avoid a busy loop.
+        val delay = if (reconnects == 0) 0L
+            else (1_000L shl (reconnects - 1).coerceAtMost(6)).coerceAtMost(60_000L)
+        reconnects = (reconnects + 1).coerceAtMost(7)
         main.removeCallbacks(reconnect)
-        main.postDelayed(reconnect, (1_000L shl (reconnects - 1)).coerceAtMost(60_000L))
+        main.postDelayed(reconnect, delay)
     }
     @Suppress("MissingPermission")
     private fun connectDevice(device: BluetoothDevice, state: String) {
@@ -777,7 +794,7 @@ class PassportBleService : Service() {
         private const val TAG = "PassportBleService"
         private const val CHANNEL_ID = "passport_ble"
         private const val NOTIFICATION_ID = 40
-        private const val MAX_RECONNECTS = 3
+        private const val DEVICE_NAME = "AI Passport"
         private const val DISCOVERY_TIMEOUT_MS = 15_000L
         private const val DEFAULT_ATT_MTU = 23
         private const val PREFERRED_ATT_MTU = 247

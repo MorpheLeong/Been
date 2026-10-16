@@ -133,11 +133,14 @@ idf.py fullclean
 不是通用环境修复命令。
 
 仓库可移植门禁在 CI 与 POSIX 开发环境中仍是权威入口。在本机原生 Windows
-环境中，固件门禁可以使用乐鑫安装器附带的 Git Bash 执行：
+环境中，使用原生 PowerShell 完成等价的隔离固件构建、合并镜像验证与归档：
 
 ```powershell
-& 'C:\Espressif\tools\idf-git\2.44.0\bin\bash.exe' ./tools/validate.sh --firmware
+.\tools\validate-firmware.ps1
 ```
+
+本机不得通过 Git Bash/MSYS/MinGW 运行 ESP-IDF 固件门禁。ESP-IDF v5.5.3 会
+明确拒绝该环境；Git Bash 本身能够启动，并不代表它能生成本次有效的合并镜像。
 
 仓库/文档检查也可直接执行，且已经验证：
 
@@ -215,6 +218,16 @@ python -m esptool --chip esp32c3 -p <COMx> -b 460800 write-flash 0x0 build\FoloT
   使用 `tools/codex-env.ps1`；它会从官方激活输出中安全选择生成脚本。
 - 在子 PowerShell 中运行 `tools/codex-env.ps1` 后返回父 shell，无法保留 PowerShell
   function。必须在即将运行 `idf.py` 的 shell 内 dot-source 它。
+- 在 Codex managed filesystem sandbox 中，ESP-IDF 激活即使工具链完好，也可能
+  报 Windows error 623（`invalid system DLL relocation`）。只在 sandbox 外用同一条
+  原生 PowerShell 命令重试一次；不得重新扫描、重装、另建 virtualenv 或改用 Git
+  Bash。一次重试仍失败时，报告具体激活错误并停止。
+- `./tools/validate.sh --firmware` 是 POSIX/CI 命令，不是本机 Windows workaround。
+  ESP-IDF v5.5.3 会把安装器 Git Bash 判为 MSYS/MinGW 并拒绝；本机使用
+  `.\tools\validate-firmware.ps1`。
+- 本机执行 `./tools/validate.sh --static` 会停在 `cc: command not found`。本地运行
+  `python tools\check_repo.py` 和 Android 门禁；GCC host-C suite 留给 CI 或已确认的
+  POSIX host compiler。
 - 已记录路径仍有效时，不要使用系统 Gradle、另建 Python venv、重装 ESP-IDF
   或重复下载工具。
 - 不要把已安装的 `esp-clang` 设为仓库 host tests 的 `CC`。它的默认 target 是

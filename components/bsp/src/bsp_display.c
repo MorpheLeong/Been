@@ -273,15 +273,17 @@ esp_err_t bsp_display_wake(void) {
         ESP_LOGE(TAG, "ST7789 退出可恢复休眠失败: %s", esp_err_to_name(e));
         return e;
     }
-    e = esp_lcd_panel_disp_on_off(s_panel, true);
-    if (e != ESP_OK) {
-        ESP_LOGE(TAG, "ST7789 恢复显示失败: %s", esp_err_to_name(e));
-        (void)esp_lcd_panel_disp_sleep(s_panel, true);
-        return e;
-    }
     s_runtime_sleeping = false;
-    ESP_LOGI(TAG, "ST7789 已从可恢复休眠唤醒");
+    ESP_LOGI(TAG, "ST7789 已唤醒，等待首帧后开屏");
     return ESP_OK;
+}
+
+esp_err_t bsp_display_show(void) {
+    if (!s_ready || !s_panel || s_runtime_sleeping) return ESP_ERR_INVALID_STATE;
+    const esp_err_t e = esp_lcd_panel_disp_on_off(s_panel, true);
+    if (e != ESP_OK)
+        ESP_LOGE(TAG, "ST7789 恢复显示失败: %s", esp_err_to_name(e));
+    return e;
 }
 
 esp_err_t bsp_display_prepare_deep_sleep(void) {

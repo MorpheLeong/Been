@@ -144,12 +144,16 @@ intentional settings first. `fullclean` removes build output and is not a genera
 environment repair step.
 
 The repository's portable gates remain authoritative in CI and POSIX development
-environments. On this native Windows host, the firmware gate can be run with the
-Git Bash shipped by the Espressif installer:
+environments. On this native Windows host, run the equivalent isolated firmware
+build, merged-image verification, and archive flow through native PowerShell:
 
 ```powershell
-& 'C:\Espressif\tools\idf-git\2.44.0\bin\bash.exe' ./tools/validate.sh --firmware
+.\tools\validate-firmware.ps1
 ```
+
+Do not run the ESP-IDF firmware gate through Git Bash/MSYS/MinGW on this host.
+ESP-IDF v5.5.3 explicitly rejects that environment, so the Bash command cannot
+produce a current merged image even though Git Bash itself starts successfully.
 
 The repository/document check is also directly available and verified:
 
@@ -240,6 +244,17 @@ change.
 - Running `tools/codex-env.ps1` in a child PowerShell and then returning to the
   parent cannot preserve PowerShell functions. Dot-source it in the shell that
   will run `idf.py`.
+- In a managed Codex filesystem sandbox, ESP-IDF activation can fail with Windows
+  error 623 (`invalid system DLL relocation`) even though the recorded toolchain
+  is intact. Retry the same native PowerShell command once outside the sandbox;
+  do not rescan, reinstall, create another virtual environment, or switch to Git
+  Bash. If that one retry fails, report the concrete activation error and stop.
+- `./tools/validate.sh --firmware` is a POSIX/CI command, not a native-Windows
+  workaround. ESP-IDF v5.5.3 rejects the installer Git Bash as MSYS/MinGW. Use
+  `.\tools\validate-firmware.ps1` on this host.
+- `./tools/validate.sh --static` stops at `cc: command not found` on this host.
+  Run `python tools\check_repo.py` and the Android gate locally; leave the GCC
+  host-C suite to CI or a confirmed POSIX host compiler.
 - Do not use system Gradle, create another Python venv, reinstall ESP-IDF, or
   download duplicate tools while the recorded paths validate.
 - Do not set `CC` to the installed `esp-clang` for repository host tests. Its
