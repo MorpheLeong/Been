@@ -5,11 +5,19 @@ import java.nio.ByteOrder
 import java.util.zip.CRC32
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PassportProtocolTest {
+    @Test
+    fun uncheckInNeverRecordsTrack() {
+        assertFalse(PassportProtocol.commandRecordsTrack(PassportProtocol.UNCHECK_IN))
+        assertTrue(PassportProtocol.commandRecordsTrack(PassportProtocol.CHECK_IN))
+        assertTrue(PassportProtocol.commandRecordsTrack(1))
+    }
+
     @Test fun parsesTrackAndDestinationCommands() {
         val track = byteArrayOf(3, 1, 0x34, 0x12)
         assertEquals(PassportProtocol.CheckIn(0x1234, 1, "", "轨迹记录"), PassportProtocol.parseCommand(track))

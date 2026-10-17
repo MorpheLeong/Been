@@ -28,6 +28,10 @@ internal object PassportProtocol {
     const val CHECK_IN_FRAGMENT = 0x42
 
     data class CheckIn(val request: Int, val opcode: Int, val destinationId: String, val name: String)
+
+    /** Cancellation changes checklist state only; it must never request or save a location. */
+    fun commandRecordsTrack(opcode: Int): Boolean = opcode != UNCHECK_IN
+
     /** Independent setting command: never changes the existing v3 snapshot format. */
     fun screenTimeoutFrame(seconds: Int): ByteArray {
         require(seconds in 15..600)

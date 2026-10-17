@@ -89,3 +89,30 @@ passport_transition_t passport_app_model_input(passport_app_model_t *model,
     }
     return transition(model, PASSPORT_ACTION_OPEN, model->screen);
 }
+
+void passport_marker_flow_begin(passport_marker_flow_t *flow,
+                                passport_marker_operation_t operation,
+                                passport_screen_t return_screen)
+{
+    if (flow == NULL) return;
+    flow->operation = operation;
+    flow->phase = PASSPORT_MARKER_IDLE;
+    flow->return_screen = return_screen;
+}
+
+bool passport_marker_flow_accepts_short_ok(const passport_marker_flow_t *flow)
+{
+    return flow != NULL &&
+           (flow->phase == PASSPORT_MARKER_IDLE ||
+            flow->phase == PASSPORT_MARKER_FAILURE);
+}
+
+bool passport_marker_flow_records_location(const passport_marker_flow_t *flow)
+{
+    return flow != NULL && flow->operation != PASSPORT_MARKER_UNCHECKIN;
+}
+
+bool passport_marker_flow_is_destination(const passport_marker_flow_t *flow)
+{
+    return flow != NULL && flow->operation != PASSPORT_MARKER_TRACK;
+}

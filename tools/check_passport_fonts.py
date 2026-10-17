@@ -61,12 +61,18 @@ def main():
         missing = (required | common) - mapping.keys()
         assert not missing, f"{size}px missing: " + ", ".join(f"U+{cp:04X}" for cp in sorted(missing))
         assert 0x1F9A6 not in mapping, "known unsupported emoji unexpectedly covered"
+        ascii_widths = {mapping[cp]["adv_w"] for cp in range(0x21, 0x7F)}
+        cjk_widths = {mapping[cp]["adv_w"] for cp in common}
+        assert len(ascii_widths) == 1, f"{size}px ASCII is not monospaced"
+        assert len(cjk_widths) == 1, f"{size}px GB2312 is not monospaced"
+        assert next(iter(ascii_widths)) * 2 == next(iter(cjk_widths)), \
+            f"{size}px ASCII/CJK cell ratio is not 1:2"
         for cp in required:
             glyph = mapping[cp]
             if glyph["box_h"]:
                 top = height - baseline - glyph["box_h"] - glyph["ofs_y"]
                 assert 0 <= top and top + glyph["box_h"] <= height, (size, cp, top)
-        print(f"{size}px: fixed text and 6,763 GB2312 glyphs covered; line height {height}px")
+        print(f"{size}px: monospaced fixed text and 6,763 GB2312 glyphs covered; line height {height}px")
 
 
 if __name__ == "__main__":

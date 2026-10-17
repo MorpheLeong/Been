@@ -61,6 +61,47 @@ static void test_navigation_wraps_and_keeps_last_used_feature(void)
     assert(model.selected == 2);
 }
 
+static void test_marker_result_blocks_short_ok_and_keeps_return_target(void)
+{
+    const passport_marker_operation_t operations[] = {
+        PASSPORT_MARKER_TRACK,
+        PASSPORT_MARKER_CHECKIN,
+        PASSPORT_MARKER_UNCHECKIN,
+    };
+    const passport_screen_t returns[] = {
+        PASSPORT_SCREEN_HOME,
+        PASSPORT_SCREEN_HOME,
+        PASSPORT_SCREEN_CHECKLIST,
+    };
+    for (size_t i = 0; i < 3; ++i) {
+        passport_marker_flow_t flow;
+        passport_marker_flow_begin(&flow, operations[i], returns[i]);
+        assert(passport_marker_flow_accepts_short_ok(&flow));
+        assert(flow.return_screen == returns[i]);
+        flow.phase = PASSPORT_MARKER_WAITING;
+        assert(!passport_marker_flow_accepts_short_ok(&flow));
+        flow.phase = PASSPORT_MARKER_SUCCESS;
+        assert(!passport_marker_flow_accepts_short_ok(&flow));
+        flow.phase = PASSPORT_MARKER_FAILURE;
+        assert(passport_marker_flow_accepts_short_ok(&flow));
+    }
+}
+
+static void test_uncheckin_never_records_location(void)
+{
+    passport_marker_flow_t flow;
+    passport_marker_flow_begin(&flow, PASSPORT_MARKER_UNCHECKIN,
+                               PASSPORT_SCREEN_CHECKLIST);
+    assert(passport_marker_flow_is_destination(&flow));
+    assert(!passport_marker_flow_records_location(&flow));
+
+    passport_marker_flow_begin(&flow, PASSPORT_MARKER_TRACK,
+                               PASSPORT_SCREEN_HOME);
+    assert(!passport_marker_flow_is_destination(&flow));
+    assert(passport_marker_flow_records_location(&flow));
+    assert(flow.return_screen == PASSPORT_SCREEN_HOME);
+}
+
 int main(void)
 {
     const passport_screen_t long_screens[] = {
@@ -78,5 +119,7 @@ int main(void)
     test_default_focus_and_feature_restore();
     test_avatar_is_a_focusable_home_item();
     test_navigation_wraps_and_keeps_last_used_feature();
+    test_marker_result_blocks_short_ok_and_keeps_return_target();
+    test_uncheckin_never_records_location();
     return 0;
 }

@@ -376,7 +376,7 @@ class PassportBleService : Service() {
             if (activeRequestId != parsed.request) sendResult(parsed.request, false, 4)
             return
         }
-        if (parsed.opcode == PassportProtocol.UNCHECK_IN) {
+        if (!PassportProtocol.commandRecordsTrack(parsed.opcode)) {
             val destination = db.destinations().firstOrNull { it.id == parsed.destinationId }
             if (destination == null || !destination.done) {
                 sendResult(parsed.request, false, 5); return

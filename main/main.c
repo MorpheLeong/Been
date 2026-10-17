@@ -60,13 +60,6 @@ typedef struct {
     } data;
 } app_event_t;
 
-typedef enum {
-    MARKER_IDLE,
-    MARKER_WAITING,
-    MARKER_SUCCESS,
-    MARKER_FAILURE,
-} marker_state_t;
-
 static const char *TAG = "passport_app";
 static QueueHandle_t s_queue;
 static QueueHandle_t s_sound_queue;
@@ -93,16 +86,12 @@ static passport_display_policy_t s_display_policy;
 static bool s_consume_wake_gesture;
 static bsp_btn_t s_wake_button;
 static volatile bool s_ble_connected;
-static volatile marker_state_t s_marker_state;
+/* 输入任务独占结果页状态；操作完成后仍保留 operation/return_screen，直到离页。 */
+static passport_marker_flow_t s_marker_flow;
 static volatile uint16_t s_active_request_id;
 static volatile uint16_t s_timeout_request_id;
 static volatile bool s_marker_timeout_pending;
-static bool s_pending_checkin;
 static bool s_pairing_visible;
-static bool s_pending_uncheckin;
-static bool s_last_action_uncheckin;
-static bool s_last_action_destination;
-static passport_screen_t s_return_screen = PASSPORT_SCREEN_HOME;
 static char s_active_destination_id[PASSPORT_TRIP_ID_BYTES];
 static char s_active_destination_name[PASSPORT_TRIP_NAME_BYTES];
 static volatile int16_t s_local_utc_offset_minutes;
@@ -111,8 +100,6 @@ static size_t s_trip_selection;
 /* 每个描述符覆盖各自层级的 fallback，避免改写 LVGL 只读内置字体。 */
 static lv_font_t s_app_font_14;
 static lv_font_t s_app_font_20;
-static lv_font_t s_gb2312_font_14;
-static lv_font_t s_gb2312_font_20;
 static lv_font_t s_cjk_fallback_14;
 static lv_font_t s_cjk_fallback_20;
 static esp_timer_handle_t s_marker_timeout;
@@ -288,26 +275,17 @@ static void play_sound(sound_cue_t cue)
 
 static void app_fonts_init(void)
 {
-    /* 先用完整常用简体字库；超出 GB2312 的字再查 LVGL 内置 CJK 子集。
-     * 各层最后回退到对应字号的 Montserrat，避免字体 fallback 环路。 */
+    /* 应用等宽 Medium 字体同时覆盖中英文；仅缺字时才进入内置 CJK/Montserrat
+     * fallback，避免英文先被比例字体截获而破坏等宽排版。 */
     s_cjk_fallback_14 = lv_font_source_han_sans_sc_14_cjk;
     s_cjk_fallback_14.fallback = &lv_font_montserrat_14;
     s_cjk_fallback_20 = lv_font_source_han_sans_sc_16_cjk;
     s_cjk_fallback_20.fallback = &lv_font_montserrat_20;
 
-    s_gb2312_font_14 = passport_font_14;
-    s_gb2312_font_14.fallback = &s_cjk_fallback_14;
-    s_gb2312_font_20 = passport_font_20;
-    s_gb2312_font_20.fallback = &s_cjk_fallback_20;
-
-    s_app_font_14 = lv_font_montserrat_14;
-    s_app_font_14.fallback = &s_gb2312_font_14;
-    s_app_font_14.line_height = s_gb2312_font_14.line_height;
-    s_app_font_14.base_line = s_gb2312_font_14.base_line;
-    s_app_font_20 = lv_font_montserrat_20;
-    s_app_font_20.fallback = &s_gb2312_font_20;
-    s_app_font_20.line_height = s_gb2312_font_20.line_height;
-    s_app_font_20.base_line = s_gb2312_font_20.base_line;
+    s_app_font_14 = passport_font_14;
+    s_app_font_14.fallback = &s_cjk_fallback_14;
+    s_app_font_20 = passport_font_20;
+    s_app_font_20.fallback = &s_cjk_fallback_20;
 }
 
 static void refresh_header(lv_timer_t *timer)
@@ -345,12 +323,17 @@ static void refresh_header(lv_timer_t *timer)
     }
 }
 
+static const lv_font_t *app_font_for(const lv_font_t *requested)
+{
+    return requested == &lv_font_montserrat_20 || requested == &passport_font_20
+         ? &s_app_font_20 : &s_app_font_14;
+}
+
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y,
                        int width, int height, uint32_t color, const lv_font_t *font)
 {
     /* 基线与中文字库对齐，并给中文字形保留完整行高；在 LVGL 锁内调用。 */
-    const lv_font_t *app_font = font == &lv_font_montserrat_20
-                              ? &s_app_font_20 : &s_app_font_14;
+    const lv_font_t *app_font = app_font_for(font);
     lv_obj_t *obj = lv_label_create(parent);
     lv_label_set_text(obj, text);
     lv_obj_set_pos(obj, x, y);
@@ -360,6 +343,26 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y,
     lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
     lv_obj_set_style_text_font(obj, app_font, 0);
     return obj;
+}
+
+/* 在固定高度区域中按行框垂直居中。 */
+static lv_obj_t *label_in_slot(lv_obj_t *parent, const char *text,
+                               int x, int slot_y, int width, int slot_height,
+                               uint32_t color, const lv_font_t *font)
+{
+    const lv_font_t *app_font = app_font_for(font);
+    const int line_height = app_font->line_height;
+    const int y = slot_y + (slot_height > line_height
+                          ? (slot_height - line_height) / 2 : 0);
+    return label(parent, text, x, y, width, line_height, color, font);
+}
+
+static lv_obj_t *label_centered_y(lv_obj_t *parent, const char *text,
+                                  int x, int width, uint32_t color,
+                                  const lv_font_t *font)
+{
+    return label_in_slot(parent, text, x, 0, width, lv_obj_get_height(parent),
+                         color, font);
 }
 
 static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h)
@@ -423,8 +426,10 @@ static void base_screen(const char *title)
     lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *bar = panel(s_screen, 8, 8, 224, 28);
-    s_clock_text = label(bar, "--:--", 8, 5, 118, 18, C_GREEN, &lv_font_montserrat_14);
-    s_battery_text = label(bar, "--%", 170, 5, 46, 18, C_DIM, &lv_font_montserrat_14);
+    s_clock_text = label(bar, "--:--", 8, 5, 118, 18, C_GREEN,
+                         &lv_font_montserrat_14);
+    s_battery_text = label(bar, "--%", 170, 5, 46, 18, C_DIM,
+                           &lv_font_montserrat_14);
     lv_obj_set_style_text_align(s_battery_text, LV_TEXT_ALIGN_RIGHT, 0);
     /* The display mask reserves exact physical-corner cutouts for these link dots. */
     static const int corner_x[] = { 0, BSP_LCD_W - BSP_LVGL_CORNER_ACCENT_DIAMETER,
@@ -461,21 +466,40 @@ static void base_screen(const char *title)
     label(foot, hint, 7, 5, 210, 18, C_DIM, &lv_font_montserrat_14);
 }
 
-static void draw_home(void)
+/* 头像协议固定为 46×46；按页面指定的显示尺寸缩放并在头像框内居中。 */
+static lv_obj_t *draw_avatar(lv_obj_t *parent, int x, int y,
+                             int frame_size, int image_size)
 {
-    base_screen("首页");
-    lv_obj_t *head = panel(s_screen, 8, 42, 224, 76);
-    lv_obj_t *avatar = panel(head, 8, 8, 48, 48);
+    lv_obj_t *avatar = panel(parent, x, y, frame_size, frame_size);
     if (passport_avatar_has_image()) {
         s_avatar_image.data = (const uint8_t *)passport_avatar_pixels();
         lv_obj_t *image = lv_image_create(avatar);
         lv_image_set_src(image, &s_avatar_image);
-        lv_obj_set_pos(image, 1, 1);
+        lv_obj_set_size(image, image_size, image_size);
+        lv_image_set_inner_align(image, LV_IMAGE_ALIGN_STRETCH);
+        const int inset = (frame_size - image_size) / 2;
+        lv_obj_set_pos(image, inset, inset);
     } else {
-        label(avatar, "我", 7, 13, 34, 24, C_GREEN, &lv_font_montserrat_20);
+        lv_obj_t *fallback = label_centered_y(avatar, "我", 0, frame_size,
+                                              C_GREEN, &lv_font_montserrat_20);
+        lv_obj_set_style_text_align(fallback, LV_TEXT_ALIGN_CENTER, 0);
     }
-    label(head, s_trip.profile.nickname[0] ? s_trip.profile.nickname : "未设置昵称",
-          68, 21, 145, 24, C_WHITE, &lv_font_montserrat_20);
+    return avatar;
+}
+
+static void draw_home(void)
+{
+    base_screen("首页");
+    lv_obj_t *head = panel(s_screen, 8, 42, 224, 76);
+    lv_obj_t *avatar = draw_avatar(head, 8, 8, 60, 58);
+    lv_obj_t *nickname = label_in_slot(
+        head, s_trip.profile.nickname[0] ? s_trip.profile.nickname : "未设置昵称",
+        76, 8, 140, 24, C_WHITE, &lv_font_montserrat_14);
+    lv_obj_t *social = label_in_slot(
+        head, s_trip.profile.social_count > 0 ? s_trip.profile.social_ids[0] : "暂无账号",
+        76, 44, 140, 24, C_DIM, &lv_font_montserrat_14);
+    lv_obj_set_style_text_align(nickname, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(social, LV_TEXT_ALIGN_RIGHT, 0);
     if (s_clock_timer == NULL) s_clock_timer = lv_timer_create(refresh_header, 1000, NULL);
     label(s_screen, "功能", 15, 123, 80, 18, C_GREEN,
           &lv_font_montserrat_14);
@@ -507,49 +531,59 @@ static void draw_profile(void)
 {
     base_screen("个人卡片");
     lv_obj_t *card = panel(s_screen, 8, 48, 224, 214);
-    label(card, s_trip.profile.nickname[0] ? s_trip.profile.nickname : "未设置昵称",
-          16, 14, 192, 24, C_GREEN, &lv_font_montserrat_20);
+    (void)draw_avatar(card, 160, 12, 48, PASSPORT_AVATAR_WIDTH);
+    label_in_slot(card, s_trip.profile.nickname[0] ? s_trip.profile.nickname : "未设置昵称",
+                  16, 36, 136, 24, C_GREEN, &lv_font_montserrat_20);
     label(card, s_trip.profile.bio[0] ? s_trip.profile.bio : "暂无简介",
-          16, 46, 192, 45, C_WHITE, &lv_font_montserrat_14);
-    label(card, "社交账号", 16, 98, 192, 20, C_DIM, &lv_font_montserrat_14);
+          16, 68, 192, 44, C_WHITE, &lv_font_montserrat_14);
+    label_in_slot(card, "社交账号", 16, 118, 192, 20, C_DIM,
+                  &lv_font_montserrat_14);
     if (s_trip.profile.social_count == 0) {
-        label(card, "暂无账号", 16, 123, 192, 20, C_WHITE, &lv_font_montserrat_14);
+        label_in_slot(card, "暂无账号", 16, 140, 192, 18, C_WHITE,
+                      &lv_font_montserrat_14);
     } else {
         for (size_t i = 0; i < s_trip.profile.social_count; ++i)
-            label(card, s_trip.profile.social_ids[i], 16, 122 + (int)i * 20,
-                  192, 19, C_WHITE, &lv_font_montserrat_14);
+            label_in_slot(card, s_trip.profile.social_ids[i], 16,
+                          140 + (int)i * 18, 192, 18, C_WHITE,
+                          &lv_font_montserrat_14);
     }
     finish_screen();
 }
 
 static void draw_marker(void)
 {
-    const bool destination_action = s_pending_checkin || s_pending_uncheckin ||
-                                    s_last_action_destination;
+    const bool destination_action = passport_marker_flow_is_destination(&s_marker_flow);
+    const bool uncheckin = s_marker_flow.operation == PASSPORT_MARKER_UNCHECKIN;
     base_screen(destination_action ? "打卡清单" : "轨迹记录");
     s_marker_card = panel(s_screen, 8, 48, 224, 214);
-    label(s_marker_card, s_pending_checkin ? "正在打卡" : (s_pending_uncheckin ? "正在取消打卡" : "记录当前位置"), 16, 15, 192, 20, C_GREEN,
+    label(s_marker_card, uncheckin ? "正在取消打卡" :
+          (destination_action ? "正在打卡" : "记录当前位置"),
+          16, 15, 192, 20, C_GREEN,
           &lv_font_montserrat_14);
     label(s_marker_card, destination_action ? s_active_destination_name : "由手机获取定位", 16, 52, 192, 22, C_WHITE,
           &lv_font_montserrat_14);
-    const char *detail = s_marker_state == MARKER_WAITING ? "正在从手机获取定位……" :
-                         (s_marker_state == MARKER_SUCCESS ? "手机已保存并确认" :
-                          (s_marker_state == MARKER_FAILURE ? "本次操作未完成" :
-                           "短按 OK 后由手机定位"));
+    const char *detail = s_marker_flow.phase == PASSPORT_MARKER_WAITING
+                       ? (uncheckin ? "正在等待手机确认……" : "正在从手机获取定位……")
+                       : (s_marker_flow.phase == PASSPORT_MARKER_SUCCESS
+                          ? "手机已保存并确认"
+                          : (s_marker_flow.phase == PASSPORT_MARKER_FAILURE
+                             ? "本次操作未完成"
+                             : (uncheckin ? "短按 OK 取消打卡" : "短按 OK 后由手机定位")));
     label(s_marker_card, detail, 16, 84, 194, 20, C_WHITE,
           &lv_font_montserrat_14);
-    label(s_marker_card, s_pending_uncheckin ? "只更新清单，不改动轨迹" : "定位信息保存在手机端", 16, 106, 194, 20, C_WHITE,
+    label(s_marker_card, uncheckin ? "只更新清单，不改动轨迹" : "定位信息保存在手机端", 16, 106, 194, 20, C_WHITE,
           &lv_font_montserrat_14);
-    const char *success_text = s_last_action_uncheckin ? "已取消打卡" :
+    const char *success_text = uncheckin ? "已取消打卡" :
                                (destination_action ? "打卡成功" : "轨迹已记录");
-    const char *state = s_marker_state == MARKER_WAITING ? "正在等待手机响应……" :
-                        (s_marker_state == MARKER_SUCCESS ? success_text :
-                         (s_marker_state == MARKER_FAILURE ? s_marker_note : ""));
+    const char *state = s_marker_flow.phase == PASSPORT_MARKER_WAITING ? "正在等待手机响应……" :
+                        (s_marker_flow.phase == PASSPORT_MARKER_SUCCESS ? success_text :
+                         (s_marker_flow.phase == PASSPORT_MARKER_FAILURE ? s_marker_note : ""));
     s_marker_state_label = label(s_marker_card, state, 14, 157, 198, 23,
                                  C_GREEN, &lv_font_montserrat_14);
-    const char *prompt = s_marker_state == MARKER_FAILURE
-                       ? "请检查连接和手机定位"
-                       : ((s_marker_state == MARKER_WAITING || s_marker_state == MARKER_SUCCESS)
+    const char *prompt = s_marker_flow.phase == PASSPORT_MARKER_FAILURE
+                       ? (uncheckin ? "请检查连接后重试" : "请检查连接和手机定位")
+                       : ((s_marker_flow.phase == PASSPORT_MARKER_WAITING ||
+                           s_marker_flow.phase == PASSPORT_MARKER_SUCCESS)
                             ? "长按 OK 返回"
                             : (s_ble_connected ? "短按 OK 开始" : "请先连接手机"));
     label(s_marker_card, prompt, 16, 187, 194, 18, C_DIM,
@@ -688,7 +722,6 @@ static const passport_trip_qr_t *selected_qr(void)
 static void draw_qr_list(void)
 {
     base_screen("二维码清单");
-    label(s_screen, "二维码清单", 16, 43, 206, 20, C_GREEN, &lv_font_montserrat_14);
     if (s_trip.qr_count == 0) {
         label(s_screen, "还没有同步二维码", 24, 106, 192, 24, C_DIM, &lv_font_montserrat_14);
         label(s_screen, "请在手机端添加我的码", 24, 136, 192, 20, C_WHITE, &lv_font_montserrat_14);
@@ -697,12 +730,13 @@ static void draw_qr_list(void)
         const size_t start = s_qr_selection / 7U * 7U;
         for (size_t i = start; i < s_trip.qr_count && i < start + 7U; ++i) {
             const bool selected = i == s_qr_selection;
-            lv_obj_t *row = panel(s_screen, 8, 72 + (int)(i - start) * 26, 224, 24);
+            lv_obj_t *row = panel(s_screen, 8, 48 + (int)(i - start) * 30, 224, 26);
             lv_obj_set_style_border_color(row, lv_color_hex(selected ? C_GREEN : C_LINE), 0);
             char text[64];
             (void)snprintf(text, sizeof(text), "%s %02u  %s", s_trip.qrs[i].starred ? "*" : " ",
                            (unsigned)(i + 1), s_trip.qrs[i].name);
-            label(row, text, 7, 3, 210, 18, selected ? C_GREEN : C_WHITE, &lv_font_montserrat_14);
+            label(row, text, 7, 3, 210, 18, selected ? C_GREEN : C_WHITE,
+                  &lv_font_montserrat_14);
         }
         char page[32];
         (void)snprintf(page, sizeof(page), "%u / %u", (unsigned)(s_qr_selection / 7U + 1U),
@@ -851,8 +885,10 @@ static void process_ble_event(const app_event_t *item)
         return;
     }
     if (item->data.ble.event == PASSPORT_BLE_AVATAR) {
-        if (s_app.screen == PASSPORT_SCREEN_HOME && bsp_lvgl_lock(500)) {
-            draw_home();
+        if ((s_app.screen == PASSPORT_SCREEN_HOME ||
+             s_app.screen == PASSPORT_SCREEN_PROFILE) && bsp_lvgl_lock(500)) {
+            if (s_app.screen == PASSPORT_SCREEN_PROFILE) draw_profile();
+            else draw_home();
             bsp_lvgl_unlock();
         }
         return;
@@ -860,8 +896,8 @@ static void process_ble_event(const app_event_t *item)
     if (item->data.ble.event == PASSPORT_BLE_CONNECTED) {
         dismiss_pairing_screen();
         s_ble_connected = true;
-        if (s_marker_state == MARKER_FAILURE) {
-            s_marker_state = MARKER_IDLE;
+        if (s_marker_flow.phase == PASSPORT_MARKER_FAILURE) {
+            s_marker_flow.phase = PASSPORT_MARKER_IDLE;
             s_marker_note = "请先连接手机";
         }
         update_marker_screen();
@@ -870,10 +906,10 @@ static void process_ble_event(const app_event_t *item)
     if (item->data.ble.event == PASSPORT_BLE_DISCONNECTED) {
         dismiss_pairing_screen();
         s_ble_connected = false;
-        if (s_marker_state == MARKER_WAITING) {
+        if (s_marker_flow.phase == PASSPORT_MARKER_WAITING) {
             (void)esp_timer_stop(s_marker_timeout);
             s_marker_timeout_pending = false;
-            s_marker_state = MARKER_FAILURE;
+            s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
             s_marker_note = "手机已断开连接";
         }
         update_marker_screen();
@@ -882,20 +918,20 @@ static void process_ble_event(const app_event_t *item)
     if (item->data.ble.event == PASSPORT_BLE_FAILED) {
         dismiss_pairing_screen();
         s_ble_connected = false;
-        if (s_marker_state == MARKER_WAITING) {
+        if (s_marker_flow.phase == PASSPORT_MARKER_WAITING) {
             (void)esp_timer_stop(s_marker_timeout);
             s_marker_timeout_pending = false;
         }
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "蓝牙连接失败";
         update_marker_screen();
         return;
     }
     if (item->data.ble.event == PASSPORT_BLE_REQUEST_FAILED) {
-        if (s_marker_state == MARKER_WAITING) {
+        if (s_marker_flow.phase == PASSPORT_MARKER_WAITING) {
             (void)esp_timer_stop(s_marker_timeout);
             s_marker_timeout_pending = false;
-            s_marker_state = MARKER_FAILURE;
+            s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
             s_marker_note = "请求未送达手机";
             play_sound(SOUND_ERROR);
             update_marker_screen();
@@ -904,20 +940,24 @@ static void process_ble_event(const app_event_t *item)
     }
 
     const passport_ble_result_t *result = &item->data.ble.result;
-    if (s_marker_state != MARKER_WAITING ||
+    if (s_marker_flow.phase != PASSPORT_MARKER_WAITING ||
         result->request_id != s_active_request_id) return;
     (void)esp_timer_stop(s_marker_timeout);
     s_marker_timeout_pending = false;
     if (!result->success) {
-        s_marker_state = MARKER_FAILURE;
-        s_marker_note = "手机未能保存定位";
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
+        s_marker_note = s_marker_flow.operation == PASSPORT_MARKER_UNCHECKIN
+            ? "手机未能更新清单" : "手机未能保存定位";
         play_sound(SOUND_ERROR);
         update_marker_screen();
         return;
     }
 
-    const size_t history_removed = passport_location_model_retain_local_day(
-        &s_records, result->timestamp_utc, result->utc_offset_minutes);
+    const bool records_location = passport_marker_flow_records_location(&s_marker_flow);
+    const size_t history_removed = records_location
+        ? passport_location_model_retain_local_day(
+              &s_records, result->timestamp_utc, result->utc_offset_minutes)
+        : 0;
     const bool history_pruned = history_removed > 0;
     if (history_pruned) {
         s_history_page = 0;
@@ -926,12 +966,12 @@ static void process_ble_event(const app_event_t *item)
     }
     uint32_t marker_id = 0;
     bool recorded = true;
-    if (s_pending_uncheckin) {
+    if (s_marker_flow.operation == PASSPORT_MARKER_UNCHECKIN) {
         recorded = passport_trip_model_set_completed(&s_trip, s_active_destination_id, false);
     } else {
         recorded = passport_location_model_add(
             &s_records, result->timestamp_utc, result->utc_offset_minutes, &marker_id);
-        if (recorded && s_pending_checkin) {
+        if (recorded && s_marker_flow.operation == PASSPORT_MARKER_CHECKIN) {
             recorded = passport_location_model_set_place(&s_records, marker_id,
                                                            s_active_destination_name) &&
                        passport_trip_model_complete(&s_trip, s_active_destination_id);
@@ -942,37 +982,35 @@ static void process_ble_event(const app_event_t *item)
             passport_store_save(&s_records) != ESP_OK) {
             ESP_LOGE(TAG, "Device history pruning succeeded but NVS save failed");
         }
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "手机定位数据无效";
         update_marker_screen();
         return;
     }
 
     s_local_utc_offset_minutes = result->utc_offset_minutes;
-    if (!s_pending_uncheckin || history_pruned) {
+    if (records_location || history_pruned) {
         if (passport_store_can_save() && passport_store_save(&s_records) != ESP_OK)
             ESP_LOGE(TAG, "Phone saved location but device NVS save failed");
     }
     const struct timeval tv = { .tv_sec = (time_t)result->timestamp_utc, .tv_usec = 0 };
     (void)settimeofday(&tv, NULL);
-    if (s_pending_checkin || s_pending_uncheckin) (void)passport_trip_store_save(&s_trip);
-    s_marker_state = MARKER_SUCCESS;
+    if (passport_marker_flow_is_destination(&s_marker_flow))
+        (void)passport_trip_store_save(&s_trip);
+    s_marker_flow.phase = PASSPORT_MARKER_SUCCESS;
     play_sound(SOUND_OK);
-    s_pending_checkin = false;
-    s_pending_uncheckin = false;
     update_marker_screen();
 }
 
 static void start_marker_request(void)
 {
-    s_last_action_destination = false;
     if (!s_ble_connected) {
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "请先连接手机";
         update_marker_screen();
         return;
     }
-    if (s_marker_state == MARKER_WAITING) return;
+    if (s_marker_flow.phase == PASSPORT_MARKER_WAITING) return;
     (void)esp_timer_stop(s_marker_timeout);
     s_marker_timeout_pending = false;
     uint16_t request_id = s_next_request_id++;
@@ -981,15 +1019,15 @@ static void start_marker_request(void)
     ESP_LOGI(TAG, "starting track request id=%u", (unsigned)request_id);
     const esp_err_t err = passport_ble_link_request_location(request_id);
     if (err != ESP_OK) {
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "请求发送失败";
         update_marker_screen();
         return;
     }
-    s_marker_state = MARKER_WAITING;
+    s_marker_flow.phase = PASSPORT_MARKER_WAITING;
     s_timeout_request_id = request_id;
     if (esp_timer_start_once(s_marker_timeout, 30000000) != ESP_OK) {
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "等待响应超时";
     }
     update_marker_screen();
@@ -998,6 +1036,7 @@ static void start_marker_request(void)
 static void start_destination_request(const passport_trip_destination_t *destination,
                                       bool undo, passport_screen_t return_screen)
 {
+    if (s_marker_flow.phase == PASSPORT_MARKER_WAITING) return;
     if (destination == NULL) {
         s_app.screen = PASSPORT_SCREEN_CHECKLIST;
         if (bsp_lvgl_lock(500)) { draw_checklist(); bsp_lvgl_unlock(); }
@@ -1007,19 +1046,16 @@ static void start_destination_request(const passport_trip_destination_t *destina
                    destination->id);
     (void)snprintf(s_active_destination_name, sizeof(s_active_destination_name), "%s",
                    destination->name);
-    s_pending_checkin = !undo;
-    s_pending_uncheckin = undo;
-    s_last_action_uncheckin = undo;
-    s_last_action_destination = true;
-    s_return_screen = return_screen;
+    passport_marker_flow_begin(&s_marker_flow,
+        undo ? PASSPORT_MARKER_UNCHECKIN : PASSPORT_MARKER_CHECKIN,
+        return_screen);
     s_marker_note = "请检查连接后重试";
     if (!s_ble_connected) {
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "请先连接手机";
         update_marker_screen();
         return;
     }
-    if (s_marker_state == MARKER_WAITING) return;
     (void)esp_timer_stop(s_marker_timeout);
     s_marker_timeout_pending = false;
     uint16_t request_id = s_next_request_id++;
@@ -1031,15 +1067,15 @@ static void start_destination_request(const passport_trip_destination_t *destina
         ? passport_ble_link_request_uncheckin(request_id, destination->id, destination->name)
         : passport_ble_link_request_checkin(request_id, destination->id, destination->name);
     if (err != ESP_OK) {
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "请求发送失败";
         update_marker_screen();
         return;
     }
-    s_marker_state = MARKER_WAITING;
+    s_marker_flow.phase = PASSPORT_MARKER_WAITING;
     s_timeout_request_id = request_id;
     if (esp_timer_start_once(s_marker_timeout, 30000000) != ESP_OK) {
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         s_marker_note = "等待响应超时";
     }
     update_marker_screen();
@@ -1056,11 +1092,6 @@ static void start_checkin_request(void)
     start_destination_request(destination, false, PASSPORT_SCREEN_HOME);
 }
 
-static void start_uncheckin_request(const passport_trip_destination_t *destination)
-{
-    start_destination_request(destination, true, PASSPORT_SCREEN_CHECKLIST);
-}
-
 static void process_input(const app_event_t *ev)
 {
     if (ev->type == APP_EVENT_BLE) {
@@ -1068,9 +1099,9 @@ static void process_input(const app_event_t *ev)
         return;
     }
     if (ev->type == APP_EVENT_TIMEOUT) {
-        if (s_marker_state == MARKER_WAITING &&
+        if (s_marker_flow.phase == PASSPORT_MARKER_WAITING &&
             ev->data.request_id == s_active_request_id) {
-            s_marker_state = MARKER_FAILURE;
+            s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
             s_marker_note = "等待手机响应超时";
             update_marker_screen();
         }
@@ -1098,6 +1129,9 @@ static void process_input(const app_event_t *ev)
         if (ev->data.button.btn == BSP_BTN_OK) key = PASSPORT_INPUT_OK;
     }
     if (key == PASSPORT_INPUT_OTHER) return;
+    /* WAITING/SUCCESS 的短按必须真正无效：不播放提示音，也不重发请求。 */
+    if (key == PASSPORT_INPUT_OK && s_app.screen == PASSPORT_SCREEN_MARKER &&
+        !passport_marker_flow_accepts_short_ok(&s_marker_flow)) return;
     play_sound(key == PASSPORT_INPUT_OK_LONG ? SOUND_OK : SOUND_KEY);
     if (s_app.screen == PASSPORT_SCREEN_HOME) {
         if (key == PASSPORT_INPUT_UP || key == PASSPORT_INPUT_DOWN) {
@@ -1131,15 +1165,13 @@ static void process_input(const app_event_t *ev)
         (void)passport_location_model_set_last_feature(&s_records, feature);
         if (passport_store_can_save()) (void)passport_store_save(&s_records);
         if (feature == 0) {
-            s_pending_checkin = false;
             s_app.screen = PASSPORT_SCREEN_MARKER;
-            s_marker_state = MARKER_IDLE;
+            passport_marker_flow_begin(&s_marker_flow, PASSPORT_MARKER_TRACK,
+                                       PASSPORT_SCREEN_HOME);
             if (bsp_lvgl_lock(500)) { draw_marker(); bsp_lvgl_unlock(); }
             start_marker_request();
         } else if (feature == 1) {
             s_app.screen = PASSPORT_SCREEN_MARKER;
-            s_marker_state = MARKER_IDLE;
-            if (bsp_lvgl_lock(500)) { draw_marker(); bsp_lvgl_unlock(); }
             start_checkin_request();
         }
         else {
@@ -1152,28 +1184,28 @@ static void process_input(const app_event_t *ev)
     }
 
     if (key == PASSPORT_INPUT_OK_LONG) {
-        if (s_marker_state == MARKER_WAITING) {
+        if (s_marker_flow.phase == PASSPORT_MARKER_WAITING) {
             (void)esp_timer_stop(s_marker_timeout);
             s_marker_timeout_pending = false;
         }
         const passport_screen_t target = s_app.screen == PASSPORT_SCREEN_MARKER
-            ? s_return_screen : (s_app.screen == PASSPORT_SCREEN_QR && s_qr_opened_from_list
+            ? s_marker_flow.return_screen : (s_app.screen == PASSPORT_SCREEN_QR && s_qr_opened_from_list
                 ? PASSPORT_SCREEN_QR_LIST : PASSPORT_SCREEN_HOME);
         s_app.screen = target;
-        s_pending_checkin = false;
-        s_pending_uncheckin = false;
-        s_marker_state = MARKER_IDLE;
+        s_marker_flow.phase = PASSPORT_MARKER_IDLE;
         if (bsp_lvgl_lock(500)) { show_screen(s_app.screen); bsp_lvgl_unlock(); }
         return;
     }
     if (key == PASSPORT_INPUT_OK && s_app.screen == PASSPORT_SCREEN_MARKER) {
-        if (s_pending_checkin || s_pending_uncheckin) {
+        if (passport_marker_flow_is_destination(&s_marker_flow)) {
             const passport_trip_destination_t *destination = NULL;
             for (size_t i = 0; i < s_trip.destination_count; ++i)
                 if (strcmp(s_trip.destinations[i].id, s_active_destination_id) == 0) {
                     destination = &s_trip.destinations[i]; break;
                 }
-            start_destination_request(destination, s_pending_uncheckin, s_return_screen);
+            start_destination_request(destination,
+                s_marker_flow.operation == PASSPORT_MARKER_UNCHECKIN,
+                s_marker_flow.return_screen);
         } else start_marker_request();
         return;
     }
@@ -1207,8 +1239,6 @@ static void process_input(const app_event_t *ev)
         s_trip_selection < s_trip.destination_count) {
         const passport_trip_destination_t *destination = &s_trip.destinations[s_trip_selection];
         s_app.screen = PASSPORT_SCREEN_MARKER;
-        s_marker_state = MARKER_IDLE;
-        if (bsp_lvgl_lock(500)) { draw_marker(); bsp_lvgl_unlock(); }
         start_destination_request(destination, destination->completed, PASSPORT_SCREEN_CHECKLIST);
         return;
     }
@@ -1307,6 +1337,8 @@ void app_main(void)
         s_local_utc_offset_minutes = newest->utc_offset_minutes;
     }
     passport_app_model_init(&s_app, PASSPORT_FEATURE_COUNT, s_records.last_feature);
+    passport_marker_flow_begin(&s_marker_flow, PASSPORT_MARKER_TRACK,
+                               PASSPORT_SCREEN_HOME);
     s_next_request_id = (uint16_t)esp_random();
     if (s_next_request_id == 0) s_next_request_id = 1;
 
@@ -1333,7 +1365,7 @@ void app_main(void)
     }
     if (passport_ble_link_start(ble_event_callback, NULL) != ESP_OK) {
         s_marker_note = "蓝牙启动失败";
-        s_marker_state = MARKER_FAILURE;
+        s_marker_flow.phase = PASSPORT_MARKER_FAILURE;
         ESP_LOGE(TAG, "BLE location link failed to start");
     }
     log_memory("ble-started");

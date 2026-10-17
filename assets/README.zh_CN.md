@@ -17,10 +17,10 @@
 
 | 文件 | 用途与来源/许可 |
 | --- | --- |
-| [`fonts/passport_gb2312_14.c`](fonts/passport_gb2312_14.c)、[`fonts/passport_gb2312_20.c`](fonts/passport_gb2312_20.c) | 简体中文 UI 字体，14px/20px、4 bpp，适配应用锁定的 LVGL 9.6.0~1。由 Noto Sans SC 经 `lv_font_conv` 1.5.3 生成，不压缩、不含字距表。覆盖 GB2312 中文、ASCII 和常用标点。Noto Sans CJK 使用 OFL 1.1 许可，见 [`fonts/OFL.txt`](fonts/OFL.txt)。 |
+| [`fonts/passport_gb2312_14.c`](fonts/passport_gb2312_14.c)、[`fonts/passport_gb2312_20.c`](fonts/passport_gb2312_20.c) | 简体中文等宽 UI 字体，14px/20px、Medium（500）、4 bpp，适配应用锁定的 LVGL 9.6.0~1。由 Noto Sans Mono CJK SC 经 `fonttools` 4.60.1 和 `lv_font_conv` 1.5.3 生成，不压缩、不含字距表。覆盖 GB2312 中文、半宽 ASCII 和常用标点。Noto Sans CJK 使用 OFL 1.1 许可，见 [`fonts/OFL.txt`](fonts/OFL.txt)。 |
 | [`fonts/passport_gb2312_symbols.txt`](fonts/passport_gb2312_symbols.txt) | GB2312 编码的 6,763 个汉字，作为可复现的字体转换字符清单。 |
 
-使用 [`tools/generate_passport_fonts.py`](../tools/generate_passport_fonts.py) 重新生成，它记录了精确标点范围和 LVGL 9 静态位图适配。`--font` 指向 Noto Sans SC 源字体，`--converter` 指向 `lv_font_conv` 1.5.3 的 JavaScript 入口。本次源文件为 `C:\Windows\Fonts\Noto Sans SC (TrueType).otf`，SHA-256 为 `A2B93E6C2DB05D6BBBF6F27D413EC73269735B7B679019C8A5AA9670FF0FFBF2`。
+使用 [`tools/generate_passport_fonts.py`](../tools/generate_passport_fonts.py) 重新生成；脚本记录精确标点范围、将可变字库固定为 500 字重，并完成 LVGL 9 静态位图适配。`--font` 指向官方 `NotoSansMonoCJKsc-VF.otf`，`--converter` 指向 `lv_font_conv` 1.5.3 的 JavaScript 入口。源字体 SHA-256 为 `ABB74B8CDDF47C8267FD4948EB2B9F275218206F6CEA8490D9305BB1B085BC7F`。
 
 [`tools/check_passport_fonts.py`](../tools/check_passport_fonts.py) 验证生成字库的 cmap 表、GB2312 覆盖、固定文案和字形边界。界面对齐中英文基线，并保留 17px/24px 行高。超出该范围的字符可以回退到内置思源黑体 SC 子集；不保证任意生僻字和表情符号的显示。
 
