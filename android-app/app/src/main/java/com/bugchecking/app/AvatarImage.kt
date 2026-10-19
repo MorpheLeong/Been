@@ -65,6 +65,31 @@ internal object AvatarImage {
         return Offset(offset.x.coerceIn(-maxX, maxX), offset.y.coerceIn(-maxY, maxY))
     }
 
+    fun displaySize(source: Bitmap, viewport: IntSize): IntSize {
+        if (viewport.width == 0 || viewport.height == 0) return IntSize.Zero
+        val side = minOf(viewport.width, viewport.height).toFloat()
+        val baseScale = max(side / source.width, side / source.height)
+        return IntSize(
+            (source.width * baseScale).roundToInt().coerceAtLeast(1),
+            (source.height * baseScale).roundToInt().coerceAtLeast(1),
+        )
+    }
+
+    fun offsetAfterGesture(
+        viewport: IntSize,
+        currentScale: Float,
+        nextScale: Float,
+        currentOffset: Offset,
+        centroid: Offset,
+        pan: Offset,
+    ): Offset {
+        if (viewport.width == 0 || viewport.height == 0 || currentScale <= 0f) return currentOffset + pan
+        val viewportCenter = Offset(viewport.width / 2f, viewport.height / 2f)
+        val relativeCentroid = centroid - viewportCenter
+        val zoomRatio = nextScale / currentScale
+        return relativeCentroid - (relativeCentroid - currentOffset) * zoomRatio + pan
+    }
+
     fun save(context: Context, bitmap: Bitmap, previousPath: String?): String {
         val directory = File(context.filesDir, "profile").apply { mkdirs() }
         val destination = File(directory, "avatar_${System.currentTimeMillis()}.png")

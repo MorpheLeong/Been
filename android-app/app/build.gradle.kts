@@ -48,6 +48,8 @@ dependencies {
     implementation("org.jsoup:jsoup:1.21.2")
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.zxing:core:3.5.4")
+    implementation("sh.calvin.reorderable:reorderable:3.1.0")
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

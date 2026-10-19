@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -37,8 +39,14 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -57,45 +65,128 @@ object PassportSpacing {
     val listMaxWidth: Dp = 840.dp
 }
 
+/** Shared translucent surfaces for the four primary destinations. */
+@Composable
+fun primaryPageChromeColor(): Color = MaterialTheme.colorScheme.surface.copy(
+    alpha = if (isSystemInDarkTheme()) 0.66f else 0.72f,
+)
+
+@Composable
+fun primaryPageNavigationColor(): Color = MaterialTheme.colorScheme.surfaceContainer.copy(
+    alpha = if (isSystemInDarkTheme()) 0.70f else 0.74f,
+)
+
+@Composable
+fun primaryPageCardColor(): Color = MaterialTheme.colorScheme.surfaceContainerLow.copy(
+    alpha = if (isSystemInDarkTheme()) 0.68f else 0.68f,
+)
+
+@Composable
+fun primaryPageSummaryColor(): Color = MaterialTheme.colorScheme.primaryContainer.copy(
+    alpha = if (isSystemInDarkTheme()) 0.76f else 0.74f,
+)
+
+@Composable
+fun primaryPageSelectedColor(): Color = MaterialTheme.colorScheme.secondaryContainer.copy(
+    alpha = if (isSystemInDarkTheme()) 0.76f else 0.74f,
+)
+
 private val PassportInk = Color(0xFF172A3A)
-private val RouteBlue = Color(0xFF356A8A)
-private val WaypointTeal = Color(0xFF347A74)
-private val JourneyAmber = Color(0xFFA76A16)
-private val MistSurface = Color(0xFFF6F8FB)
-private val NightSurface = Color(0xFF101418)
+private val RouteBlue = Color(0xFF4B69A2)
+private val CandyBlue = Color(0xFFD9E5FF)
+private val WaypointMint = Color(0xFF3A7566)
+private val CandyMint = Color(0xFFC5F1DF)
+private val JourneyPeach = Color(0xFF95566B)
+private val CandyPeach = Color(0xFFFFD9E3)
+private val CandyLemon = Color(0xFFFFE8A3)
+private val MistSurface = Color(0xFFFFF9F2)
+private val NightSurface = Color(0xFF202B36)
+private val NightSurfaceDim = Color(0xFF19232D)
+private val NightSurfaceBright = Color(0xFF3B4957)
+private val NightSurfaceLowest = Color(0xFF17212A)
+private val NightSurfaceLow = Color(0xFF2A3642)
+private val NightSurfaceContainer = Color(0xFF303E4A)
+private val NightSurfaceHigh = Color(0xFF394854)
+private val NightSurfaceHighest = Color(0xFF455563)
+private val NightOnSurface = Color(0xFFF0F4F8)
+private val NightOnSurfaceVariant = Color(0xFFCED7E0)
+private val NightOutline = Color(0xFF9CAABA)
+private val NightOutlineVariant = Color(0xFF718294)
 
 private val PassportLightScheme = lightColorScheme(
     primary = RouteBlue,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFCDE5F6),
-    onPrimaryContainer = PassportInk,
-    secondary = WaypointTeal,
+    primaryContainer = CandyBlue,
+    onPrimaryContainer = Color(0xFF102A50),
+    secondary = WaypointMint,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFCEE9E5),
+    secondaryContainer = CandyMint,
     onSecondaryContainer = Color(0xFF0B302D),
-    tertiary = JourneyAmber,
+    tertiary = JourneyPeach,
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFFFDDB0),
-    onTertiaryContainer = Color(0xFF351F00),
+    tertiaryContainer = CandyPeach,
+    onTertiaryContainer = Color(0xFF3D1020),
     surface = MistSurface,
     onSurface = PassportInk,
+    surfaceContainerLow = Color(0xFFFFF4E7),
+    surfaceContainer = Color(0xFFF9EEDC),
+    surfaceContainerHigh = Color(0xFFFFE9BC),
+    surfaceContainerHighest = CandyLemon,
 )
 
 private val PassportDarkScheme = darkColorScheme(
-    primary = Color(0xFF9CCBEB),
-    onPrimary = Color(0xFF00344D),
-    primaryContainer = Color(0xFF164E68),
-    onPrimaryContainer = Color(0xFFCDE5F6),
-    secondary = Color(0xFF92D2CB),
-    onSecondary = Color(0xFF003733),
-    secondaryContainer = Color(0xFF18504B),
-    onSecondaryContainer = Color(0xFFCEE9E5),
-    tertiary = Color(0xFFF4BD72),
-    onTertiary = Color(0xFF462A00),
-    tertiaryContainer = Color(0xFF654000),
-    onTertiaryContainer = Color(0xFFFFDDB0),
+    primary = Color(0xFFB8D8F4),
+    onPrimary = Color(0xFF17344B),
+    primaryContainer = Color(0xFF416487),
+    onPrimaryContainer = Color(0xFFF2F6FF),
+    secondary = Color(0xFFA9DED2),
+    onSecondary = Color(0xFF173A34),
+    secondaryContainer = Color(0xFF3E695F),
+    onSecondaryContainer = Color(0xFFF0FFF9),
+    tertiary = Color(0xFFFFC4D1),
+    onTertiary = Color(0xFF4F2934),
+    tertiaryContainer = Color(0xFF7A5260),
+    onTertiaryContainer = Color(0xFFFFF1F4),
     surface = NightSurface,
-    onSurface = Color(0xFFE2E8EE),
+    onSurface = NightOnSurface,
+    onSurfaceVariant = NightOnSurfaceVariant,
+    surfaceDim = NightSurfaceDim,
+    surfaceBright = NightSurfaceBright,
+    surfaceContainerLowest = NightSurfaceLowest,
+    surfaceContainerLow = NightSurfaceLow,
+    surfaceContainer = NightSurfaceContainer,
+    surfaceContainerHigh = NightSurfaceHigh,
+    surfaceContainerHighest = NightSurfaceHighest,
+    outline = NightOutline,
+    outlineVariant = NightOutlineVariant,
+)
+
+private fun softenDynamicLight(scheme: androidx.compose.material3.ColorScheme) = scheme.copy(
+    primaryContainer = lerp(scheme.primaryContainer, CandyBlue, 0.22f),
+    secondaryContainer = lerp(scheme.secondaryContainer, CandyMint, 0.22f),
+    tertiaryContainer = lerp(scheme.tertiaryContainer, CandyPeach, 0.18f),
+    surface = lerp(scheme.surface, MistSurface, 0.16f),
+)
+
+private fun softenDynamicDark(scheme: androidx.compose.material3.ColorScheme) = scheme.copy(
+    primaryContainer = lerp(scheme.primaryContainer, Color(0xFF416487), 0.38f),
+    onPrimaryContainer = Color(0xFFF2F6FF),
+    secondaryContainer = lerp(scheme.secondaryContainer, Color(0xFF3E695F), 0.36f),
+    onSecondaryContainer = Color(0xFFF0FFF9),
+    tertiaryContainer = lerp(scheme.tertiaryContainer, Color(0xFF7A5260), 0.34f),
+    onTertiaryContainer = Color(0xFFFFF1F4),
+    surface = NightSurface,
+    onSurface = NightOnSurface,
+    onSurfaceVariant = NightOnSurfaceVariant,
+    surfaceDim = NightSurfaceDim,
+    surfaceBright = NightSurfaceBright,
+    surfaceContainerLowest = NightSurfaceLowest,
+    surfaceContainerLow = NightSurfaceLow,
+    surfaceContainer = NightSurfaceContainer,
+    surfaceContainerHigh = NightSurfaceHigh,
+    surfaceContainerHighest = NightSurfaceHighest,
+    outline = NightOutline,
+    outlineVariant = NightOutlineVariant,
 )
 
 private val PassportTypography = Typography().let { baseline ->
@@ -121,8 +212,10 @@ fun PassportTheme(
 ) {
     val context = LocalContext.current
     val scheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && darkTheme -> dynamicDarkColorScheme(context)
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && darkTheme ->
+            softenDynamicDark(dynamicDarkColorScheme(context))
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            softenDynamicLight(dynamicLightColorScheme(context))
         darkTheme -> PassportDarkScheme
         else -> PassportLightScheme
     }
@@ -134,12 +227,44 @@ fun PassportTheme(
     )
 }
 
+/** Clears the previous editor before children handle the new down event; the event is never consumed. */
+fun Modifier.clearFocusOnTapOutside(): Modifier = composed {
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    pointerInput(focusManager, keyboard) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            focusManager.clearFocus()
+            keyboard?.hide()
+        }
+    }
+}
+
 enum class PassportSyncStatus(val label: String) {
+    DISCONNECTED("未连接 Passport"),
     LOCAL_SAVED("已保存到手机"),
     PENDING("等待同步"),
     SYNCING("正在同步"),
     SYNCED("已同步到 Passport"),
     FAILED("同步失败，可重试"),
+}
+
+internal fun resolveSyncStatus(
+    connected: Boolean,
+    message: String,
+    hasLocalChanges: Boolean,
+): PassportSyncStatus {
+    if (!connected) return PassportSyncStatus.DISCONNECTED
+    val value = message.trim()
+    return when {
+        value.contains("失败") || value.contains("错误") || value.contains("超出") || value.contains("重试") ->
+            PassportSyncStatus.FAILED
+        value.contains("正在") || value.contains("准备") || value.contains("写入") ->
+            PassportSyncStatus.SYNCING
+        value.contains("已同步") || value.contains("同步完成") -> PassportSyncStatus.SYNCED
+        hasLocalChanges -> PassportSyncStatus.PENDING
+        else -> PassportSyncStatus.LOCAL_SAVED
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -156,7 +281,7 @@ fun PassportPageScaffold(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.clearFocusOnTapOutside(),
         topBar = {
             TopAppBar(
                 title = {
@@ -224,22 +349,15 @@ fun MapProviderPickerSheet(
             ),
         ) {
             Text("选择地图应用", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "按实际打卡坐标打开，不会修改这条轨迹",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = PassportSpacing.xxs, bottom = PassportSpacing.md),
-            )
+            Spacer(Modifier.size(PassportSpacing.md))
             MapProviderChoice(
                 title = "高德地图",
-                description = "适合查看中国大陆地点",
                 icon = { Icon(Icons.Default.Map, contentDescription = null) },
                 onClick = onAmap,
             )
             Spacer(Modifier.size(PassportSpacing.xs))
             MapProviderChoice(
                 title = "Google Maps",
-                description = "适合查看海外地点",
                 icon = { Icon(Icons.Default.Public, contentDescription = null) },
                 onClick = onGoogle,
             )
@@ -250,7 +368,6 @@ fun MapProviderPickerSheet(
 @Composable
 private fun MapProviderChoice(
     title: String,
-    description: String,
     icon: @Composable () -> Unit,
     onClick: () -> Unit,
 ) {
@@ -262,7 +379,6 @@ private fun MapProviderChoice(
     ) {
         ListItem(
             headlineContent = { Text(title) },
-            supportingContent = { Text(description) },
             leadingContent = {
                 Surface(
                     shape = MaterialTheme.shapes.medium,

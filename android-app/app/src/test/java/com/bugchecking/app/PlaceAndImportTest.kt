@@ -152,6 +152,11 @@ class PlaceAndImportTest {
         assertEquals(listOf("M.O.D TOKYO", "IAPM Mall"), ordinary.candidates.map { it.text })
     }
 
+    @Test fun aSinglePastedPlaceStillEntersCandidatePreview() {
+        val result = ImportEngine.extractStructuredText("朝阳公园", "粘贴文本")
+        assertEquals(listOf("朝阳公园"), result.candidates.map { it.text })
+    }
+
     @Test fun switchingTableColumnReusesRowsAndPreservesOrder() {
         val initial = ImportEngine.extractStructuredText(
             "日期\t目的地\t景点\n09.25\t万州\t长江夜景\n09.26\t成都\t大源中央公园",

@@ -1,19 +1,27 @@
 package com.bugchecking.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.bluetooth.BluetoothManager
+import android.location.Criteria
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.provider.Settings
 import android.provider.OpenableColumns
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -22,18 +30,28 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -44,8 +62,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -53,15 +75,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
@@ -71,6 +95,8 @@ import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -82,9 +108,14 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -100,31 +131,53 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -135,17 +188,26 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import java.text.DateFormat
+import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
+import java.util.Locale
 import android.location.Address
 import android.location.Geocoder
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.distinctUntilChanged
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     private lateinit var permissionLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
@@ -188,7 +250,6 @@ class MainActivity : ComponentActivity() {
                 PassportApp(db, bleState.value, bleConnected.value, dataRevision.intValue,
                     windowSizeClass.widthSizeClass,
                     { requestBlePermissions { connectOrOpenSettings() } },
-                    { stopBle() },
                     { requestBlePermissions { requestSync() } },
                     pendingShare.value,
                     { pendingShare.value = null })
@@ -243,16 +304,16 @@ class MainActivity : ComponentActivity() {
             adapter?.bondedDevices?.any { it.name == "BugChecking" || it.name == "AI Passport" } == true
         }.getOrDefault(false)
         if (!hasBondedPassport) {
+            bleState.value = "请先在系统蓝牙设置中配对 BugChecking"
             Toast.makeText(this, "请先在系统蓝牙设置中配对 BugChecking", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
             return
         }
+        bleState.value = "正在连接 BugChecking"
         startBle()
     }
-    private fun stopBle() {
-        startService(Intent(this, PassportBleService::class.java).setAction(PassportBleService.ACTION_STOP))
-    }
     private fun requestSync() {
+        bleState.value = "正在同步"
         ContextCompat.startForegroundService(this, Intent(this, PassportBleService::class.java).setAction(PassportBleService.ACTION_SYNC))
     }
     override fun onDestroy() { runCatching { unregisterReceiver(stateReceiver) }; super.onDestroy() }
@@ -267,8 +328,10 @@ private enum class Tab(val route: String, val title: String, val label: String, 
 
 private object Routes {
     const val TrackMap = "track-map"
+    const val TrackCreate = "track-create"
     const val TrackEdit = "track-edit"
     const val ChecklistImport = "checklist-import"
+    const val QrPresent = "qr-present"
 }
 
 private val DetailEnterEasing = CubicBezierEasing(0f, 0f, 0f, 1f)
@@ -276,7 +339,8 @@ private val DetailExitEasing = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 
 private fun NavBackStackEntry.isSecondaryDestination(): Boolean {
     val route = destination.route.orEmpty()
-    return route == Routes.TrackMap || route == Routes.ChecklistImport || route.startsWith(Routes.TrackEdit)
+    return route == Routes.TrackMap || route == Routes.TrackCreate || route == Routes.ChecklistImport ||
+        route.startsWith(Routes.TrackEdit) || route.startsWith(Routes.QrPresent)
 }
 
 private fun detailEnterTransition(): EnterTransition =
@@ -312,7 +376,6 @@ private fun PassportApp(
     externalRevision: Int,
     widthSizeClass: WindowWidthSizeClass,
     connect: () -> Unit,
-    disconnect: () -> Unit,
     sync: () -> Unit,
     sharedSource: ImportSource?,
     onSharedSourceConsumed: () -> Unit,
@@ -320,8 +383,12 @@ private fun PassportApp(
     val context = LocalContext.current
     var revision by remember { mutableIntStateOf(0) }
     var initialImportSource by remember { mutableStateOf<ImportSource?>(null) }
+    var qrCreateRequest by remember { mutableIntStateOf(0) }
     var initialMapLink by remember { mutableStateOf<String?>(null) }
     var pendingMapShare by remember { mutableStateOf<String?>(null) }
+    var lastSyncedRevision by remember { mutableIntStateOf(0) }
+    var statusOverlayMessage by remember { mutableStateOf<String?>(null) }
+    var deviceStatusInitialized by remember { mutableStateOf(false) }
     val navController = rememberNavController()
     val destinations = remember(revision, externalRevision) { db.destinations() }
     val qrs = remember(revision, externalRevision) { db.qrs() }
@@ -330,6 +397,30 @@ private fun PassportApp(
     val volume = remember(revision, externalRevision) { db.soundVolume() }
     val screenTimeout = remember(revision, externalRevision) { db.screenTimeoutSeconds() }
     val refresh: () -> Unit = { revision++ }
+    LaunchedEffect(bleState) {
+        if (resolveSyncStatus(bleConnected, bleState, revision > lastSyncedRevision) == PassportSyncStatus.SYNCED) {
+            lastSyncedRevision = revision
+        }
+    }
+    val syncStatus = resolveSyncStatus(bleConnected, bleState, revision > lastSyncedRevision)
+    val deviceActionState = resolveDeviceActionState(bleConnected, syncStatus, bleState)
+    LaunchedEffect(bleState, bleConnected, syncStatus) {
+        if (!deviceStatusInitialized) {
+            deviceStatusInitialized = true
+            return@LaunchedEffect
+        }
+        val message = when {
+            !bleConnected && bleState.isNotBlank() -> bleState.replace("Passport", "BugChecking")
+            syncStatus == PassportSyncStatus.FAILED -> bleState
+            syncStatus == PassportSyncStatus.PENDING -> syncStatus.label
+            syncStatus == PassportSyncStatus.SYNCING -> syncStatus.label
+            syncStatus == PassportSyncStatus.SYNCED -> syncStatus.label
+            else -> bleState
+        }.ifBlank { syncStatus.label }
+        statusOverlayMessage = message
+        delay(5_000L)
+        if (statusOverlayMessage == message) statusOverlayMessage = null
+    }
     val compact = widthSizeClass == WindowWidthSizeClass.Compact
     LaunchedEffect(sharedSource) {
         if (sharedSource == null) return@LaunchedEffect
@@ -351,24 +442,45 @@ private fun PassportApp(
             restoreState = true
         }
     }
-    NavHost(
-        navController = navController,
-        startDestination = Tab.Tracks.route,
-        enterTransition = { EnterTransition.None },
-        exitTransition = { ExitTransition.None },
-        popEnterTransition = { EnterTransition.None },
-        popExitTransition = { ExitTransition.None },
-    ) {
+    Box(Modifier.fillMaxSize()) {
+        PrimaryPageBackdrop()
+        NavHost(
+            navController = navController,
+            startDestination = Tab.Tracks.route,
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None },
+        ) {
         composable(
             route = Tab.Tracks.route,
             exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
             popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
         ) {
-            PassportRootScaffold(Tab.Tracks, compact, bleState, bleConnected, ::openTab, sync) {
+            PassportRootScaffold(
+                Tab.Tracks,
+                compact,
+                deviceActionState,
+                statusOverlayMessage,
+                ::openTab,
+                if (bleConnected) sync else connect,
+                floatingActionButton = {
+                    Column(horizontalAlignment = Alignment.End) {
+                        FloatingActionButton(
+                            onClick = { navController.navigate(Routes.TrackMap) },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) { Icon(Icons.Default.Map, contentDescription = "打开地图模式") }
+                        Spacer(Modifier.height(PassportSpacing.sm))
+                        FloatingActionButton(onClick = { navController.navigate(Routes.TrackCreate) }) {
+                            Icon(Icons.Default.Add, contentDescription = "手动添加轨迹")
+                        }
+                    }
+                },
+            ) {
                 TracksPage(
                     tracks,
                     edit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
-                    openMap = { navController.navigate(Routes.TrackMap) },
                 )
             }
         }
@@ -377,8 +489,20 @@ private fun PassportApp(
             exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
             popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
         ) {
-            PassportRootScaffold(Tab.Checklist, compact, bleState, bleConnected, ::openTab, sync) {
-                ChecklistPage(db, destinations, refresh) { navController.navigate(Routes.ChecklistImport) }
+            PassportRootScaffold(
+                Tab.Checklist,
+                compact,
+                deviceActionState,
+                statusOverlayMessage,
+                ::openTab,
+                if (bleConnected) sync else connect,
+                floatingActionButton = {
+                    FloatingActionButton(onClick = { navController.navigate(Routes.ChecklistImport) }) {
+                        Icon(Icons.Default.Add, contentDescription = "添加到清单")
+                    }
+                },
+            ) {
+                ChecklistPage(db, destinations, refresh)
             }
         }
         composable(
@@ -386,8 +510,28 @@ private fun PassportApp(
             exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
             popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
         ) {
-            PassportRootScaffold(Tab.Qr, compact, bleState, bleConnected, ::openTab, sync) {
-                QrPage(db, qrs, destinations, refresh)
+            PassportRootScaffold(
+                Tab.Qr,
+                compact,
+                deviceActionState,
+                statusOverlayMessage,
+                ::openTab,
+                if (bleConnected) sync else connect,
+                floatingActionButton = {
+                    FloatingActionButton(onClick = { qrCreateRequest++ }) {
+                        Icon(Icons.Default.Add, contentDescription = "添加二维码")
+                    }
+                },
+            ) {
+                QrPage(
+                    db = db,
+                    qrs = qrs,
+                    destinations = destinations,
+                    refresh = refresh,
+                    createRequest = qrCreateRequest,
+                    onCreateRequestConsumed = { qrCreateRequest = 0 },
+                    present = { qr -> navController.navigate("${Routes.QrPresent}/${qr.id}") },
+                )
             }
         }
         composable(
@@ -395,9 +539,16 @@ private fun PassportApp(
             exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
             popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
         ) {
-            PassportRootScaffold(Tab.Me, compact, bleState, bleConnected, ::openTab, sync) {
+            PassportRootScaffold(
+                Tab.Me,
+                compact,
+                deviceActionState,
+                statusOverlayMessage,
+                ::openTab,
+                if (bleConnected) sync else connect,
+            ) {
                 ProfileSettingsPage(
-                    profile, volume, screenTimeout, bleState, bleConnected, connect, disconnect,
+                    profile, volume, screenTimeout,
                     onSave = { value ->
                         runCatching { db.saveProfile(value) }
                             .onSuccess { refresh(); Toast.makeText(context, "已保存到手机；同步后会更新 Passport", Toast.LENGTH_SHORT).show() }
@@ -429,6 +580,21 @@ private fun PassportApp(
             )
         }
         composable(
+            route = Routes.TrackCreate,
+            enterTransition = { detailEnterTransition() },
+            popExitTransition = { detailExitTransition() },
+        ) {
+            ManualTrackEditorScreen(
+                track = null,
+                onBack = { navController.popBackStack() },
+                onSave = { draft ->
+                    db.addManualTrack(draft)
+                    refresh()
+                    navController.popBackStack()
+                },
+            )
+        }
+        composable(
             route = "${Routes.TrackEdit}/{trackId}",
             arguments = listOf(navArgument("trackId") { type = NavType.LongType }),
             enterTransition = { detailEnterTransition() },
@@ -437,6 +603,17 @@ private fun PassportApp(
             val track = tracks.firstOrNull { it.id == entry.arguments?.getLong("trackId") }
             if (track == null) {
                 LaunchedEffect(Unit) { navController.popBackStack() }
+            } else if (track.entrySource == TrackEntrySource.MANUAL) {
+                ManualTrackEditorScreen(
+                    track = track,
+                    onBack = { navController.popBackStack() },
+                    onDelete = { db.deleteTrack(track.id); refresh(); navController.popBackStack() },
+                    onSave = { draft ->
+                        db.updateManualTrack(track.id, draft)
+                        refresh()
+                        navController.popBackStack()
+                    },
+                )
             } else {
                 TrackEditorScreen(
                     track = track,
@@ -464,6 +641,17 @@ private fun PassportApp(
                 },
             )
         }
+        composable(
+            route = "${Routes.QrPresent}/{qrId}",
+            arguments = listOf(navArgument("qrId") { type = NavType.StringType }),
+            enterTransition = { detailEnterTransition() },
+            popExitTransition = { detailExitTransition() },
+        ) { entry ->
+            val qr = qrs.firstOrNull { it.id == entry.arguments?.getString("qrId") }
+            if (qr == null) LaunchedEffect(Unit) { navController.popBackStack() }
+            else QrPresentScreen(qr = qr, onBack = { navController.popBackStack() })
+        }
+        }
     }
     pendingMapShare?.let { sharedText ->
         AlertDialog(
@@ -490,85 +678,152 @@ private fun PassportApp(
     }
 }
 
+@Composable
+private fun PrimaryPageBackdrop() {
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    val backgroundMatrix = remember(dark) {
+        ColorMatrix().apply { setToSaturation(if (dark) 0.30f else 0.68f) }
+    }
+    Box(Modifier.fillMaxSize()) {
+        Image(
+            painter = painterResource(R.drawable.bugchecking_city_map_halftone),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.Center,
+            colorFilter = ColorFilter.colorMatrix(backgroundMatrix),
+            modifier = Modifier.fillMaxSize().alpha(if (dark) 0.50f else 0.78f),
+        )
+        Box(
+            Modifier.fillMaxSize().background(
+                MaterialTheme.colorScheme.surface.copy(alpha = if (dark) 0.76f else 0.68f),
+            ),
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PassportRootScaffold(
     tab: Tab,
     compact: Boolean,
-    bleState: String,
-    bleConnected: Boolean,
+    deviceActionState: DeviceActionState,
+    statusOverlayMessage: String?,
     onTabSelected: (Tab) -> Unit,
-    sync: () -> Unit,
+    onDeviceAction: () -> Unit,
+    floatingActionButton: @Composable () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
-    Row(Modifier.fillMaxSize()) {
-        if (!compact) NavigationRail {
-            Spacer(Modifier.size(PassportSpacing.sm))
-            Tab.entries.forEach { item ->
-                NavigationRailItem(
-                    selected = tab == item,
-                    onClick = { onTabSelected(item) },
-                    icon = { Icon(item.icon, contentDescription = null) },
-                    label = { Text(item.label) },
-                )
+    val rotation by rememberInfiniteTransition(label = "sync rotation").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+        label = "sync rotation value",
+    )
+    Box(Modifier.fillMaxSize().clearFocusOnTapOutside()) {
+        Row(Modifier.fillMaxSize()) {
+            if (!compact) NavigationRail(
+                containerColor = primaryPageNavigationColor(),
+            ) {
+                Spacer(Modifier.size(PassportSpacing.sm))
+                Tab.entries.forEach { item ->
+                    NavigationRailItem(
+                        selected = tab == item,
+                        onClick = { onTabSelected(item) },
+                        icon = { Icon(item.icon, contentDescription = null) },
+                        label = { Text(item.label) },
+                    )
+                }
             }
-        }
-        Scaffold(
-            modifier = Modifier.weight(1f),
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(tab.title)
-                            Text(
-                                if (bleConnected) "设备已连接" else bleState,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Scaffold(
+                modifier = Modifier.weight(1f),
+                containerColor = Color.Transparent,
+                topBar = {
+                    TopAppBar(
+                        title = { Text(tab.title) },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = primaryPageChromeColor(),
+                            scrolledContainerColor = primaryPageNavigationColor(),
+                        ),
+                        actions = {
+                            AnimatedVisibility(
+                                visible = statusOverlayMessage != null,
+                                enter = fadeIn(tween(180)),
+                                exit = fadeOut(tween(180)),
+                            ) {
+                                Text(
+                                    statusOverlayMessage.orEmpty(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.widthIn(max = if (compact) 132.dp else 220.dp)
+                                        .semantics { liveRegion = LiveRegionMode.Polite },
+                                )
+                            }
+                            IconButton(
+                                onClick = onDeviceAction,
+                                enabled = deviceActionState != DeviceActionState.CONNECTING &&
+                                    deviceActionState != DeviceActionState.SYNCING,
+                            ) {
+                                val icon = when (deviceActionState) {
+                                    DeviceActionState.DISCONNECTED -> Icons.Default.BluetoothDisabled
+                                    DeviceActionState.CONNECTING -> Icons.AutoMirrored.Filled.BluetoothSearching
+                                    else -> Icons.Default.Sync
+                                }
+                                Icon(
+                                    icon,
+                                    contentDescription = when (deviceActionState) {
+                                        DeviceActionState.DISCONNECTED -> "连接 BugChecking"
+                                        DeviceActionState.CONNECTING -> "正在连接 BugChecking"
+                                        DeviceActionState.FAILED -> "重试同步"
+                                        DeviceActionState.SYNCING -> "正在同步到 Passport"
+                                        DeviceActionState.CONNECTED -> "同步到 Passport"
+                                    },
+                                    modifier = if (deviceActionState == DeviceActionState.SYNCING) {
+                                        Modifier.graphicsLayer { rotationZ = rotation }
+                                    } else Modifier,
+                                )
+                            }
+                        }
+                    )
+                },
+                bottomBar = {
+                    if (compact) NavigationBar(
+                        containerColor = primaryPageNavigationColor(),
+                    ) {
+                        Tab.entries.forEach { item ->
+                            NavigationBarItem(
+                                selected = tab == item,
+                                onClick = { onTabSelected(item) },
+                                icon = { Icon(item.icon, contentDescription = null) },
+                                label = { Text(item.label) },
                             )
                         }
-                    },
-                    actions = {
-                        IconButton(onClick = sync, enabled = bleConnected) {
-                            Icon(Icons.Default.Sync, contentDescription = if (bleConnected) "同步到 Passport" else "未连接，无法同步")
-                        }
-                    },
-                )
-            },
-            bottomBar = {
-                if (compact) NavigationBar {
-                    Tab.entries.forEach { item ->
-                        NavigationBarItem(
-                            selected = tab == item,
-                            onClick = { onTabSelected(item) },
-                            icon = { Icon(item.icon, contentDescription = null) },
-                            label = { Text(item.label) },
-                        )
+                    }
+                },
+                floatingActionButton = floatingActionButton,
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)) {
+                    Column(
+                        Modifier.widthIn(max = PassportSpacing.listMaxWidth).fillMaxSize().align(Alignment.TopCenter)
+                            .padding(horizontal = if (compact) PassportSpacing.md else PassportSpacing.lg)
+                            .padding(top = PassportSpacing.lg),
+                    ) {
+                        content()
                     }
                 }
-            },
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                Column(
-                    Modifier.widthIn(max = PassportSpacing.listMaxWidth).fillMaxSize().align(Alignment.TopCenter)
-                        .padding(horizontal = if (compact) PassportSpacing.md else PassportSpacing.lg),
-                ) { content() }
             }
         }
     }
 }
 
-private fun formatTrackDate(track: TrackPoint): String =
-    "${DateFormat.getDateTimeInstance().format(Date(track.time))} · ${track.lat}, ${track.lon}"
+private fun formatTrackDate(track: TrackPoint): String = DateFormat.getDateTimeInstance().format(Date(track.time))
 
 @Composable
 private fun ProfileSettingsPage(
     profile: PassportProfile,
     volume: Int,
     screenTimeout: Int,
-    bleState: String,
-    bleConnected: Boolean,
-    connect: () -> Unit,
-    disconnect: () -> Unit,
     onSave: (PassportProfile) -> Unit,
     onAvatarChange: (String?) -> Unit,
     onVolumeSave: (Int) -> Unit,
@@ -595,43 +850,23 @@ private fun ProfileSettingsPage(
         }
     }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 32.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary,
-                    ) {
-                        Icon(
-                            if (bleConnected) Icons.Default.BluetoothConnected else Icons.Default.Bluetooth,
-                            contentDescription = null,
-                            modifier = Modifier.padding(12.dp).size(24.dp),
-                        )
-                    }
-                    Column(Modifier.weight(1f).padding(start = 16.dp)) {
-                        Text("BugChecking", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(bleState, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                    }
-                }
-                if (bleConnected) {
-                    OutlinedButton(onClick = disconnect, modifier = Modifier.fillMaxWidth()) { Text("断开连接") }
-                } else {
-                    Button(onClick = connect, modifier = Modifier.fillMaxWidth()) { Text("连接设备") }
-                }
-            }
-        }
-
-        Text("个人资料", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Text("个人身份", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Card(colors = CardDefaults.cardColors(
+            containerColor = primaryPageCardColor(),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        )) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm),
+                ) {
                     Surface(
-                        modifier = Modifier.size(88.dp),
-                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(96.dp),
+                        shape = MaterialTheme.shapes.large,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                     ) {
                         if (avatar != null) Image(
@@ -640,19 +875,11 @@ private fun ProfileSettingsPage(
                             Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(38.dp))
                         }
                     }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { avatarPicker.launch(arrayOf("image/*")) },
-                            enabled = !avatarBusy,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (avatarBusy) "正在读取…" else if (avatar == null) "从本地选择头像" else "更换头像") }
-                        if (profile.avatarPath != null) OutlinedButton(onClick = {
-                            AvatarImage.remove(profile.avatarPath); onAvatarChange(null)
-                        }, modifier = Modifier.fillMaxWidth()) { Text("移除头像") }
-                    }
+                    FilledTonalButton(
+                        onClick = { avatarPicker.launch(arrayOf("image/*")) },
+                        enabled = !avatarBusy,
+                    ) { Text(if (avatarBusy) "正在读取…" else "更换头像") }
                 }
-                Text("裁切比例固定为 1:1，可拖动和双指缩放；手机保留裁切后的高清原图。",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 avatarError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 OutlinedTextField(nickname, { nickname = it }, label = { Text("机主昵称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(bio, { bio = it }, label = { Text("简介") }, minLines = 2, modifier = Modifier.fillMaxWidth())
@@ -666,7 +893,10 @@ private fun ProfileSettingsPage(
         }
 
         Text("设备设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Card(colors = CardDefaults.cardColors(
+            containerColor = primaryPageCardColor(),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        )) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("提示音量", style = MaterialTheme.typography.titleSmall)
@@ -727,6 +957,8 @@ private fun AvatarCropDialog(
     var scale by remember(source) { mutableFloatStateOf(1f) }
     var offset by remember(source) { mutableStateOf(Offset.Zero) }
     var viewport by remember(source) { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    val displaySize = remember(source, viewport) { AvatarImage.displaySize(source, viewport) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("裁切头像") },
@@ -740,21 +972,32 @@ private fun AvatarCropDialog(
                             offset = AvatarImage.clampOffset(source, viewport, scale, offset)
                         }
                         .pointerInput(source, viewport) {
-                            detectTransformGestures { _, pan, zoom, _ ->
+                            detectTransformGestures { centroid, pan, zoom, _ ->
                                 val nextScale = (scale * zoom).coerceIn(1f, 8f)
+                                val nextOffset = AvatarImage.offsetAfterGesture(
+                                    viewport = viewport,
+                                    currentScale = scale,
+                                    nextScale = nextScale,
+                                    currentOffset = offset,
+                                    centroid = centroid,
+                                    pan = pan,
+                                )
                                 scale = nextScale
-                                offset = AvatarImage.clampOffset(source, viewport, nextScale, offset + pan)
+                                offset = AvatarImage.clampOffset(source, viewport, nextScale, nextOffset)
                             }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Image(
                         source.asImageBitmap(), "头像裁切预览",
-                        Modifier.fillMaxSize().graphicsLayer {
+                        Modifier.requiredSize(
+                            with(density) { displaySize.width.toDp() },
+                            with(density) { displaySize.height.toDp() },
+                        ).graphicsLayer {
                             scaleX = scale; scaleY = scale
                             translationX = offset.x; translationY = offset.y
                         },
-                        contentScale = ContentScale.Crop,
+                        contentScale = ContentScale.FillBounds,
                     )
                 }
                 Text("拖动调整位置，双指缩放大小", style = MaterialTheme.typography.bodySmall)
@@ -770,82 +1013,248 @@ private fun AvatarCropDialog(
 }
 
 @Composable
-private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit, openMap: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(top = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("最近记录", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            FilledTonalButton(onClick = openMap) { Icon(Icons.Default.Map, null); Spacer(Modifier.width(8.dp)); Text("地图模式") }
-        }
-        if (rows.isEmpty()) Text("还没有轨迹记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(rows, key = { it.id }) { row -> Card(modifier = Modifier.fillMaxWidth().clickable { edit(row) }) { Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                Text(row.name, fontWeight = FontWeight.Medium)
-                Text("${DateFormat.getDateTimeInstance().format(Date(row.time))} · ${row.lat}, ${row.lon}", style = MaterialTheme.typography.bodySmall)
-            } } }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refresh: () -> Unit, import: () -> Unit) {
-    val context = LocalContext.current
-    var adding by remember { mutableStateOf(false) }
-    var editingDestination by remember { mutableStateOf<Destination?>(null) }
-    var dragDistance by remember { mutableFloatStateOf(0f) }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(top = 12.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { adding = true }, modifier = Modifier.weight(1f)) { Text("添加") }
-            OutlinedButton(onClick = import, modifier = Modifier.weight(1f)) { Text("导入") }
-        }
-        Text("长按卡片并拖动排序", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(destinations, key = { _, item -> item.id }) { index, destination ->
-                val containerColor = if (destination.done) MaterialTheme.colorScheme.surfaceContainerLow
-                    else MaterialTheme.colorScheme.secondaryContainer
-                val contentColor = if (destination.done) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.onSecondaryContainer
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = containerColor, contentColor = contentColor),
-                    modifier = Modifier.fillMaxWidth().clickable { editingDestination = destination }.pointerInput(destination.id, destinations) {
-                    detectDragGesturesAfterLongPress(onDragEnd = { dragDistance = 0f }) { change, amount ->
-                        change.consume(); dragDistance += amount.y
-                        val steps = (dragDistance / 84f).toInt()
-                        if (steps != 0) {
-                            val from = destinations.indexOfFirst { it.id == destination.id }
-                            db.reorder(from, (from + steps).coerceIn(destinations.indices))
-                            dragDistance -= steps * 84f; refresh()
+private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
+    val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val dayLabelFormat = remember { SimpleDateFormat("M月d日 EEEE", Locale.CHINA) }
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val groups = remember(rows) { rows.groupBy { dayFormat.format(Date(it.time)) } }
+    Column(Modifier.fillMaxSize()) {
+        if (rows.isEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = primaryPageCardColor(),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(PassportSpacing.lg), verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                    Icon(Icons.Default.Route, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Text("还没有轨迹记录", style = MaterialTheme.typography.titleMedium)
+                    Text("完成一次打卡后，这里会按日期整理你的到访地点。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 104.dp),
+        ) {
+            groups.forEach { (_, dayRows) ->
+                item(key = "day-${dayRows.first().time}") {
+                    Text(
+                        dayLabelFormat.format(Date(dayRows.first().time)),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = PassportSpacing.sm, bottom = PassportSpacing.xs),
+                    )
+                }
+                itemsIndexed(dayRows, key = { _, row -> row.id }) { index, row ->
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                        Box(Modifier.width(36.dp).fillMaxHeight()) {
+                            if (index > 0) {
+                                Box(
+                                    Modifier.align(Alignment.TopCenter)
+                                        .width(2.dp)
+                                        .fillMaxHeight(0.5f)
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                            }
+                            if (index < dayRows.lastIndex) {
+                                Box(
+                                    Modifier.align(Alignment.BottomCenter)
+                                        .width(2.dp)
+                                        .fillMaxHeight(0.5f)
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                            }
+                            Surface(
+                                modifier = Modifier.align(Alignment.Center).size(12.dp),
+                                shape = RoundedCornerShape(999.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                            ) {}
                         }
-                    }
-                }) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(shape = RoundedCornerShape(12.dp), color = contentColor.copy(alpha = 0.10f)) {
-                            Text(
-                                (index + 1).toString().padStart(2, '0'),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = contentColor,
-                            )
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = primaryPageCardColor(),
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                            ),
+                            modifier = Modifier.weight(1f).padding(vertical = PassportSpacing.xxs).clickable { edit(row) },
+                        ) {
+                            Column(
+                                Modifier.fillMaxWidth().padding(PassportSpacing.md),
+                                verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs),
+                            ) {
+                                Text(row.name, style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                        "${timeFormat.format(Date(row.time))} · ${trackAccuracyLabel(row)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                        Text(
-                            destination.name,
-                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = contentColor,
-                        )
-                        if (destination.qrId != null) {
-                            Icon(Icons.Default.Link, contentDescription = "已绑定二维码", tint = contentColor)
-                        }
-                        Icon(Icons.Default.DragHandle, contentDescription = "长按拖动排序", tint = contentColor.copy(alpha = 0.65f))
                     }
                 }
             }
         }
     }
-    if (adding) DestinationDialog(onDismiss = { adding = false }) { name ->
-        runCatching { db.addDestination(name) }
-            .onSuccess { refresh(); adding = false }
-            .onFailure { Toast.makeText(context, it.message ?: "添加失败", Toast.LENGTH_LONG).show() }
+}
+
+@Composable
+private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refresh: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    var editingDestination by remember { mutableStateOf<Destination?>(null) }
+    val completed = destinations.count { it.done }
+    val progress = checklistProgress(completed, destinations.size)
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 450f),
+        label = "checklist progress",
+    )
+    val pendingItems = destinations.filterNot { it.done }
+    val completedItems = destinations.filter { it.done }
+    var pendingOrderIds by remember(destinations) { mutableStateOf(pendingItems.map { it.id }) }
+    var completedOrderIds by remember(destinations) { mutableStateOf(completedItems.map { it.id }) }
+    val listState = rememberLazyListState()
+    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+        val movedId = from.key as? String ?: return@rememberReorderableLazyListState
+        val targetId = to.key as? String ?: return@rememberReorderableLazyListState
+        when {
+            movedId in pendingOrderIds && targetId in pendingOrderIds ->
+                pendingOrderIds = moveChecklistId(pendingOrderIds, movedId, targetId)
+            movedId in completedOrderIds && targetId in completedOrderIds ->
+                completedOrderIds = moveChecklistId(completedOrderIds, movedId, targetId)
+            else -> return@rememberReorderableLazyListState
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm), modifier = Modifier.fillMaxSize()) {
+        Card(colors = CardDefaults.cardColors(
+            containerColor = primaryPageSummaryColor(),
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        )) {
+            Column(Modifier.fillMaxWidth().padding(PassportSpacing.md), verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("完成度", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("$completed / ${destinations.size}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                LinearProgressIndicator(
+                    progress = { animatedProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(999.dp)),
+                )
+                Text(
+                    "已打卡 ${checklistProgressPercent(completed, destinations.size)}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+        if (destinations.isEmpty()) {
+            Text("清单还是空的", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = PassportSpacing.md))
+        } else LazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+            contentPadding = PaddingValues(bottom = 104.dp),
+        ) {
+            fun androidx.compose.foundation.lazy.LazyListScope.destinationGroup(
+                title: String,
+                groupItems: List<Destination>,
+                orderIds: List<String>,
+            ) {
+                val values = orderIds.mapNotNull { id -> groupItems.firstOrNull { it.id == id } }
+                if (values.isEmpty()) return
+                item(key = "group-$title") {
+                    Text(
+                        "$title · ${values.size}",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = PassportSpacing.sm, bottom = PassportSpacing.xxs),
+                    )
+                }
+                itemsIndexed(values, key = { _, destination -> destination.id }) { groupIndex, destination ->
+                    val latestOrderIds by rememberUpdatedState(orderIds)
+                    val latestGroupIds by rememberUpdatedState(groupItems.map { it.id })
+                    val containerColor = primaryPageCardColor()
+                    val contentColor = if (destination.done) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurface
+                    val accessibilityActions = buildList {
+                        if (groupIndex > 0) add(CustomAccessibilityAction("上移 ${destination.name}") {
+                            val from = destinations.indexOfFirst { it.id == destination.id }
+                            val to = destinations.indexOfFirst { it.id == values[groupIndex - 1].id }
+                            if (from >= 0 && to >= 0) {
+                                db.reorder(from, to)
+                                refresh()
+                                true
+                            } else false
+                        })
+                        if (groupIndex < values.lastIndex) add(CustomAccessibilityAction("下移 ${destination.name}") {
+                            val from = destinations.indexOfFirst { it.id == destination.id }
+                            val to = destinations.indexOfFirst { it.id == values[groupIndex + 1].id }
+                            if (from >= 0 && to >= 0) {
+                                db.reorder(from, to)
+                                refresh()
+                                true
+                            } else false
+                        })
+                    }
+                    ReorderableItem(reorderableState, key = destination.id) { isDragging ->
+                        val interactionSource = remember { MutableInteractionSource() }
+                        val cardElevation by animateDpAsState(
+                            targetValue = if (isDragging) 8.dp else 0.dp,
+                            animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                            label = "drag elevation",
+                        )
+                        Card(
+                            onClick = { editingDestination = destination },
+                            interactionSource = interactionSource,
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isDragging) {
+                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f)
+                                } else containerColor,
+                                contentColor = contentColor,
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = cardElevation),
+                            modifier = Modifier.fillMaxWidth()
+                                .animateItem(
+                                    placementSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    ),
+                                )
+                                .semantics { customActions = accessibilityActions }
+                                .longPressDraggableHandle(
+                                    interactionSource = interactionSource,
+                                    onDragStarted = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                    },
+                                    onDragStopped = {
+                                        val finalIndex = latestOrderIds.indexOf(destination.id)
+                                        reorderIndicesWithinGroup(
+                                            allIds = destinations.map { it.id },
+                                            originalGroupIds = latestGroupIds,
+                                            movedId = destination.id,
+                                            finalGroupIndex = finalIndex,
+                                        )?.let { (fromIndex, toIndex) -> db.reorder(fromIndex, toIndex) }
+                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                        refresh()
+                                    },
+                                ),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = PassportSpacing.xs, end = PassportSpacing.xxs, top = PassportSpacing.xs, bottom = PassportSpacing.xs),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = destination.done,
+                                    onCheckedChange = { db.setDestinationDone(destination.id, it); refresh() },
+                                )
+                                Column(Modifier.weight(1f).padding(horizontal = PassportSpacing.sm)) {
+                                    Text(destination.name, style = MaterialTheme.typography.titleMedium, color = contentColor)
+                                    if (destination.qrId != null) Text("已绑定二维码", style = MaterialTheme.typography.bodySmall, color = contentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            destinationGroup("待打卡", pendingItems, pendingOrderIds)
+            destinationGroup("已完成", completedItems, completedOrderIds)
+        }
     }
     editingDestination?.let { destination ->
         DestinationDialog(
@@ -858,40 +1267,104 @@ private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refre
 }
 
 @Composable
-private fun QrPage(db: PassportDb, qrs: List<PassportQr>, destinations: List<Destination>, refresh: () -> Unit) {
+private fun QrPage(
+    db: PassportDb,
+    qrs: List<PassportQr>,
+    destinations: List<Destination>,
+    refresh: () -> Unit,
+    createRequest: Int,
+    onCreateRequestConsumed: () -> Unit,
+    present: (PassportQr) -> Unit,
+) {
     var showEditor by remember { mutableStateOf(false) }
     var current by remember { mutableStateOf<PassportQr?>(null) }
     var pendingDelete by remember { mutableStateOf<PassportQr?>(null) }
     val context = LocalContext.current
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(top = 16.dp)) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-            Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("最多星标 3 个；设备最多缓存 10 个", style = MaterialTheme.typography.titleSmall)
-                Text("二维码原文保存在手机本地，仅同步星标码和清单关联码。", style = MaterialTheme.typography.bodySmall)
+    val lastStarredIndex = qrs.indexOfLast { it.starred }
+    LaunchedEffect(createRequest) {
+        if (createRequest > 0) {
+            current = null
+            showEditor = true
+            onCreateRequestConsumed()
+        }
+    }
+    if (qrs.isEmpty()) Column(
+        verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Card(colors = CardDefaults.cardColors(
+            containerColor = primaryPageCardColor(),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        )) {
+            Column(Modifier.fillMaxWidth().padding(PassportSpacing.lg), verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                Icon(Icons.Default.QrCode2, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                Text("还没有二维码", style = MaterialTheme.typography.titleMedium)
+                Text("可保存登机牌、会员码或活动凭证，内容只保存在手机本地。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Button(onClick = { current = null; showEditor = true }) { Text("添加二维码") }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(qrs, key = { it.id }) { qr ->
+    } else LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+        contentPadding = PaddingValues(bottom = 104.dp),
+    ) {
+            itemsIndexed(qrs, key = { _, qr -> qr.id }) { index, qr ->
                 val boundDestination = destinations.firstOrNull { it.qrId == qr.id }
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.QrCode2, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                        Text(qr.name, fontWeight = FontWeight.Medium)
-                        val details = buildList {
-                            add(if (qr.starred) "星标同步" else "仅保存在手机")
-                            boundDestination?.let { add("绑定 ${it.name}") }
-                        }.joinToString(" · ")
-                        Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val qrContentColor = if (qr.starred) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurface
+                val qrSupportingColor = if (qr.starred) {
+                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.78f)
+                } else MaterialTheme.colorScheme.onSurfaceVariant
+                Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (qr.starred) primaryPageSelectedColor() else primaryPageCardColor(),
+                            contentColor = qrContentColor,
+                        ),
+                        modifier = Modifier.fillMaxWidth().clickable { present(qr) },
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(
+                                start = PassportSpacing.md,
+                                end = PassportSpacing.xxs,
+                                top = PassportSpacing.sm,
+                                bottom = PassportSpacing.sm,
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(
+                                Modifier.weight(1f).padding(end = PassportSpacing.xs),
+                                verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs),
+                            ) {
+                                Text(qr.name, style = MaterialTheme.typography.titleMedium)
+                                boundDestination?.let {
+                                    Text("绑定 ${it.name}", style = MaterialTheme.typography.bodySmall, color = qrSupportingColor)
+                                }
+                            }
+                            IconToggleButton(
+                                checked = qr.starred,
+                                onCheckedChange = { checked ->
+                                    runCatching { db.addQr(qr.name, qr.payload, checked, qr.id) }
+                                        .onSuccess { refresh() }
+                                        .onFailure { Toast.makeText(context, it.message ?: "星标更新失败", Toast.LENGTH_LONG).show() }
+                                },
+                            ) {
+                                Icon(
+                                    if (qr.starred) Icons.Default.Star else Icons.Default.StarBorder,
+                                    contentDescription = if (qr.starred) "取消星标 ${qr.name}" else "星标 ${qr.name}",
+                                )
+                            }
+                            IconButton(onClick = { current = qr; showEditor = true }) {
+                                Icon(Icons.Default.Edit, contentDescription = "编辑 ${qr.name}")
+                            }
+                            IconButton(onClick = { pendingDelete = qr }) {
+                                Icon(Icons.Default.Delete, contentDescription = "删除 ${qr.name}")
+                            }
+                        }
                     }
-                    TextButton(onClick = { current = qr; showEditor = true }) { Text("编辑") }
-                    IconButton(onClick = { pendingDelete = qr }) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除 ${qr.name}")
-                    }
-                } }
+                    if (index == lastStarredIndex) QrSyncHint()
+                }
             }
-        }
+            if (lastStarredIndex < 0) item(key = "qr-sync-hint") { QrSyncHint() }
     }
     if (showEditor) QrEditorDialog(
         current,
@@ -914,6 +1387,93 @@ private fun QrPage(db: PassportDb, qrs: List<PassportQr>, destinations: List<Des
             onConfirm = { db.deleteQr(qr.id); refresh(); pendingDelete = null },
             onDismiss = { pendingDelete = null },
         )
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+@Composable
+private fun QrSyncHint() {
+    Text(
+        "最多星标 3 个 · 星标和清单关联码会同步到 Passport",
+        modifier = Modifier.padding(
+            start = PassportSpacing.md,
+            end = PassportSpacing.md,
+            top = PassportSpacing.sm,
+        ),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QrPresentScreen(qr: PassportQr, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val activity = context.findActivity()
+    val bitmap = remember(qr.payload) { runCatching { QrCodeImage.create(qr.payload) }.getOrNull() }
+    BackHandler(onBack = onBack)
+    DisposableEffect(view, activity) {
+        val oldKeepScreenOn = view.keepScreenOn
+        val oldBrightness = activity?.window?.attributes?.screenBrightness
+        view.keepScreenOn = true
+        activity?.window?.attributes = activity.window.attributes.apply { screenBrightness = 1f }
+        onDispose {
+            view.keepScreenOn = oldKeepScreenOn
+            if (oldBrightness != null) activity.window.attributes = activity.window.attributes.apply { screenBrightness = oldBrightness }
+        }
+    }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(qr.name) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回二维码列表")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = PassportSpacing.lg, vertical = PassportSpacing.md),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text("请将屏幕对准扫码器", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "已保持亮屏并临时调至最高亮度",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = PassportSpacing.xxs, bottom = PassportSpacing.lg),
+            )
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = androidx.compose.ui.graphics.Color.White,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxWidth().widthIn(max = 520.dp).aspectRatio(1f),
+            ) {
+                if (bitmap != null) Image(
+                    bitmap.asImageBitmap(),
+                    contentDescription = "${qr.name} 二维码",
+                    modifier = Modifier.fillMaxSize().padding(PassportSpacing.md),
+                    contentScale = ContentScale.Fit,
+                ) else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("二维码生成失败", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Text(
+                "二维码内容不会显示在页面上，避免旁人直接读取原文。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = PassportSpacing.lg),
+            )
+        }
     }
 }
 
@@ -975,10 +1535,9 @@ private fun SmartImportScreen(
     }
     BackHandler(onBack = leave)
     PassportPageScaffold(
-        title = "智能导入清单",
-        subtitle = if (extraction == null) "1 选择来源 · 2 解析 · 3 复核" else "复核识别结果",
+        title = "添加到清单",
         onBack = leave,
-        primaryActionLabel = if (extraction == null) null else "导入 ${selected.size} 项",
+        primaryActionLabel = if (extraction == null) null else "添加 ${selected.size} 项",
         primaryActionEnabled = selected.isNotEmpty() && job == null,
         onPrimaryAction = confirmImport,
     ) { padding ->
@@ -990,14 +1549,14 @@ private fun SmartImportScreen(
             ) {
                 if (extraction == null) {
                     Text(
-                        "粘贴清单、公开网页链接，或选择 Excel、CSV、图片和 PDF。内容只在手机本地解析。",
+                        "输入一个地点、粘贴多行清单或公开网页链接，也可选择 Excel、CSV、图片和 PDF。内容只在手机本地解析。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = PassportSpacing.md),
                     )
-                    OutlinedTextField(pasted, { pasted = it }, label = { Text("粘贴内容") }, minLines = 6, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(pasted, { pasted = it }, label = { Text("地点或清单内容") }, minLines = 6, modifier = Modifier.fillMaxWidth())
                     Button(onClick = { start(ImportSource.Pasted(pasted)) }, enabled = pasted.isNotBlank() && job == null,
-                        modifier = Modifier.fillMaxWidth()) { Text("解析粘贴内容") }
+                        modifier = Modifier.fillMaxWidth()) { Text("生成预览") }
                     OutlinedButton(onClick = {
                         fileLauncher.launch(arrayOf(
                             "text/*", "image/*", "application/pdf", "application/vnd.ms-excel",
@@ -1102,24 +1661,24 @@ private fun confidenceLabel(value: ImportConfidence) = when (value) {
 }
 @Composable
 private fun DestinationDialog(
-    destination: Destination? = null,
+    destination: Destination,
     onDismiss: () -> Unit,
-    onDelete: (() -> Unit)? = null,
+    onDelete: () -> Unit,
     onSave: (String) -> Unit,
 ) {
-    var text by remember(destination?.id) { mutableStateOf(destination?.name.orEmpty()) }
-    var confirmDelete by remember(destination?.id) { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (destination == null) "添加地点" else "编辑地点") },
+    var text by remember(destination.id) { mutableStateOf(destination.name) }
+    var confirmDelete by remember(destination.id) { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("编辑地点") },
         text = { OutlinedTextField(text, { text = it }, label = { Text("目的地") }, singleLine = true) },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (onDelete != null) TextButton(onClick = { confirmDelete = true }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = { confirmDelete = true }) { Text("删除", color = MaterialTheme.colorScheme.error) }
                 TextButton(onClick = onDismiss) { Text("取消") }
                 TextButton(onClick = { onSave(text) }) { Text("保存") }
             }
         })
-    if (confirmDelete && onDelete != null) ConfirmDeleteDialog(
-        title = "删除“${destination?.name.orEmpty()}”？",
+    if (confirmDelete) ConfirmDeleteDialog(
+        title = "删除“${destination.name}”？",
         description = "该项目会从打卡清单中移除，此操作无法恢复。",
         onConfirm = onDelete,
         onDismiss = { confirmDelete = false },
@@ -1170,10 +1729,666 @@ private fun QrEditorDialog(
                     }
                 }
             }
-            Text("原文按 UTF-8 最多 192 字节；二维码扫描效果需在 Passport 屏幕上验证。", style = MaterialTheme.typography.bodySmall)
+            Text("原文按 UTF-8 最多 192 字节；保存后可直接在手机内全屏出示。", style = MaterialTheme.typography.bodySmall)
         } },
         confirmButton = { TextButton(onClick = { onSave(name, payload, starred, selectedDestinationId) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PickerField(
+    label: String,
+    value: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = modifier.heightIn(min = 56.dp),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = PassportSpacing.md, vertical = PassportSpacing.xs),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.Start,
+        ) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ManualTrackEditorScreen(
+    track: TrackPoint?,
+    onBack: () -> Unit,
+    onSave: (ManualTrackDraft) -> Unit,
+    onDelete: (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var name by rememberSaveable(track?.id) { mutableStateOf(track?.name.orEmpty()) }
+    var timestamp by rememberSaveable(track?.id) { mutableStateOf(track?.time ?: System.currentTimeMillis()) }
+    var latitude by rememberSaveable(track?.id) { mutableStateOf(track?.lat?.let(::formatCoordinate).orEmpty()) }
+    var longitude by rememberSaveable(track?.id) { mutableStateOf(track?.lon?.let(::formatCoordinate).orEmpty()) }
+    var accuracy by rememberSaveable(track?.id) { mutableStateOf(track?.accuracy ?: 0f) }
+    var provider by rememberSaveable(track?.id) { mutableStateOf(track?.provider ?: PlaceProvider.MANUAL) }
+    var address by rememberSaveable(track?.id) { mutableStateOf(track?.address) }
+    var placeId by rememberSaveable(track?.id) { mutableStateOf(track?.placeId) }
+    var originalUrl by rememberSaveable(track?.id) { mutableStateOf(track?.originalUrl) }
+    var canonicalUrl by rememberSaveable(track?.id) { mutableStateOf(track?.canonicalUrl) }
+    var resolutionState by rememberSaveable(track?.id) {
+        mutableStateOf(track?.resolutionState ?: PlaceResolutionState.MANUAL_CONFIRMATION)
+    }
+    var initialLocationRequested by rememberSaveable(track?.id) { mutableStateOf(track != null) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var moreMenuOpen by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var locating by remember { mutableStateOf(false) }
+    var locateRequest by remember { mutableIntStateOf(0) }
+    var locationMessage by rememberSaveable(track?.id) { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+    var messageIsError by remember { mutableStateOf(false) }
+    var nearbyPlaces by remember { mutableStateOf<List<NearbyPlaceCandidate>>(emptyList()) }
+    var nearbyLoading by remember { mutableStateOf(false) }
+    var nearbyExpanded by remember { mutableStateOf(false) }
+    var linkToolsExpanded by remember { mutableStateOf(false) }
+    var linkText by rememberSaveable(track?.id) { mutableStateOf(track?.originalUrl.orEmpty()) }
+    var parsingLink by remember { mutableStateOf(false) }
+    var mapPickerOpen by remember { mutableStateOf(false) }
+
+    fun coordinateTrack(): TrackPoint? {
+        val lat = latitude.toDoubleOrNull()?.takeIf { it.isFinite() && it in -90.0..90.0 } ?: return null
+        val lon = longitude.toDoubleOrNull()?.takeIf { it.isFinite() && it in -180.0..180.0 } ?: return null
+        return TrackPoint(
+            id = track?.id ?: -1L,
+            requestId = track?.requestId ?: "manual-preview",
+            destinationId = null,
+            name = name.ifBlank { "未命名地点" },
+            lat = lat,
+            lon = lon,
+            time = timestamp,
+            accuracy = accuracy,
+            provider = provider,
+            address = address,
+            placeId = placeId,
+            originalUrl = originalUrl,
+            canonicalUrl = canonicalUrl,
+            resolutionState = resolutionState,
+            entrySource = TrackEntrySource.MANUAL,
+        )
+    }
+
+    fun findNearby(selectFirstWhenUnnamed: Boolean = false) {
+        val coordinate = coordinateTrack()
+        if (coordinate == null) {
+            message = "请先输入有效的经纬度"
+            messageIsError = true
+            return
+        }
+        nearbyLoading = true
+        message = ""
+        scope.launch {
+            runCatching { loadNearbyPlaces(context, coordinate) }
+                .onSuccess { values ->
+                    nearbyPlaces = values
+                    nearbyExpanded = values.isNotEmpty()
+                    if (selectFirstWhenUnnamed && name.isBlank()) values.firstOrNull()?.let { candidate ->
+                        name = candidate.name
+                        provider = PlaceProvider.SYSTEM
+                        address = candidate.address
+                        resolutionState = PlaceResolutionState.PARTIAL
+                    }
+                    if (values.isEmpty()) {
+                        message = "附近没有可用的地点名称，可继续手动输入"
+                        messageIsError = false
+                    }
+                }
+                .onFailure {
+                    message = "附近地点加载失败，可继续手动输入"
+                    messageIsError = false
+                }
+            nearbyLoading = false
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants.values.any { it }) locateRequest++ else {
+            locationMessage = "未获得定位权限，请手动输入坐标或稍后重新定位"
+        }
+    }
+
+    fun requestLocationPermissionOrLocate() {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (granted) locateRequest++ else permissionLauncher.launch(
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+        )
+    }
+
+    LaunchedEffect(track?.id) {
+        if (track == null && !initialLocationRequested) {
+            initialLocationRequested = true
+            requestLocationPermissionOrLocate()
+        }
+    }
+    LaunchedEffect(locateRequest) {
+        if (locateRequest == 0) return@LaunchedEffect
+        locating = true
+        locationMessage = "正在获取当前位置…"
+        val location = findCurrentLocation(context)
+        locating = false
+        if (location == null) {
+            locationMessage = "无法获取当前位置，请检查系统定位或手动输入坐标"
+        } else {
+            latitude = formatCoordinate(location.latitude)
+            longitude = formatCoordinate(location.longitude)
+            accuracy = location.accuracy.coerceAtLeast(0f)
+            locationMessage = "已获取当前位置 · ${trackAccuracyLabel(coordinateTrack()!!)}"
+            findNearby(selectFirstWhenUnnamed = true)
+        }
+    }
+
+    fun parseLink() {
+        if (linkText.isBlank() || parsingLink) return
+        parsingLink = true
+        message = ""
+        scope.launch {
+            runCatching { resolveSharedPlace(linkText) }
+                .onSuccess { place ->
+                    name = place.name.orEmpty()
+                    provider = place.provider
+                    address = place.address
+                    placeId = place.placeId
+                    originalUrl = place.originalUrl ?: linkText
+                    canonicalUrl = place.canonicalUrl
+                    resolutionState = place.state
+                    linkToolsExpanded = false
+                    message = "已填入地图识别到的名称，坐标保持不变"
+                    messageIsError = false
+                }
+                .onFailure {
+                    message = it.message ?: "链接解析失败"
+                    messageIsError = true
+                }
+            parsingLink = false
+        }
+    }
+
+    fun save() {
+        val draft = runCatching {
+            ManualTrackDraft(
+                name = name.trim(),
+                latitude = latitude.toDouble(),
+                longitude = longitude.toDouble(),
+                time = timestamp,
+                accuracy = accuracy,
+                provider = provider,
+                address = address,
+                placeId = placeId,
+                originalUrl = originalUrl,
+                canonicalUrl = canonicalUrl,
+                resolutionState = resolutionState,
+            ).also(ManualTrackDraft::requireValid)
+        }.getOrElse {
+            message = it.message ?: "请检查地点名称、时间和坐标"
+            messageIsError = true
+            return
+        }
+        onSave(draft)
+    }
+
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    BackHandler(onBack = onBack)
+    PassportPageScaffold(
+        title = if (track == null) "添加轨迹" else "编辑轨迹",
+        subtitle = if (accuracy > 0f) "当前位置精度 ${accuracy.toInt()} m" else "时间与坐标可手动调整",
+        onBack = onBack,
+        actions = {
+            if (onDelete != null) {
+                Box {
+                    IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Default.MoreVert, "更多操作") }
+                    DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("删除这条轨迹", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = { moreMenuOpen = false; confirmDelete = true },
+                        )
+                    }
+                }
+            }
+        },
+        primaryActionLabel = "保存轨迹",
+        onPrimaryAction = ::save,
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                Modifier.fillMaxSize().widthIn(max = PassportSpacing.formMaxWidth).align(Alignment.TopCenter)
+                    .verticalScroll(rememberScrollState()).padding(PassportSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        provider = PlaceProvider.MANUAL
+                        resolutionState = PlaceResolutionState.MANUAL_CONFIRMATION
+                    },
+                    label = { Text("地点名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+                ) {
+                    PickerField(
+                        label = "日期",
+                        value = dateFormat.format(Date(timestamp)),
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.weight(1f),
+                    )
+                    PickerField(
+                        label = "时间",
+                        value = timeFormat.format(Date(timestamp)),
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("坐标", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    FilledTonalButton(onClick = ::requestLocationPermissionOrLocate, enabled = !locating) {
+                        Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(PassportSpacing.xxs))
+                        Text(if (locating) "定位中…" else "重新定位")
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                    OutlinedTextField(
+                        value = latitude,
+                        onValueChange = { latitude = it; accuracy = 0f },
+                        label = { Text("纬度") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = longitude,
+                        onValueChange = { longitude = it; accuracy = 0f },
+                        label = { Text("经度") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (locationMessage.isNotBlank()) Text(
+                    locationMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("附近地点", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { if (nearbyPlaces.isEmpty()) findNearby() else nearbyExpanded = !nearbyExpanded }) {
+                        Text(if (nearbyPlaces.isNotEmpty() && nearbyExpanded) "收起" else if (nearbyPlaces.isNotEmpty()) "展开" else "查找")
+                    }
+                }
+                if (nearbyLoading) Row(horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("正在查找附近名称…", style = MaterialTheme.typography.bodyMedium)
+                }
+                if (nearbyExpanded) Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
+                    nearbyPlaces.forEach { candidate ->
+                        Surface(
+                            onClick = {
+                                name = candidate.name
+                                provider = PlaceProvider.SYSTEM
+                                address = candidate.address
+                                resolutionState = PlaceResolutionState.PARTIAL
+                            },
+                            shape = MaterialTheme.shapes.medium,
+                            color = if (name.trim() == candidate.name) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surfaceContainerLow,
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = PassportSpacing.xs),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(selected = name.trim() == candidate.name, onClick = null)
+                                Text(candidate.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                Text(formatNearbyDistance(candidate.distanceMeters), style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = { mapPickerOpen = true },
+                    enabled = coordinateTrack() != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Map, null)
+                    Spacer(Modifier.width(PassportSpacing.xs))
+                    Text("在地图中查看")
+                }
+                TextButton(onClick = { linkToolsExpanded = !linkToolsExpanded }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Link, null)
+                    Spacer(Modifier.width(PassportSpacing.xs))
+                    Text(if (linkToolsExpanded) "收起地图链接" else "从地图分享内容识别")
+                }
+                if (linkToolsExpanded) {
+                    OutlinedTextField(
+                        value = linkText,
+                        onValueChange = { linkText = it },
+                        label = { Text("高德或 Google Maps 分享内容") },
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    FilledTonalButton(
+                        onClick = ::parseLink,
+                        enabled = linkText.isNotBlank() && !parsingLink,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (parsingLink) "解析中…" else "识别名称") }
+                }
+                if (message.isNotBlank()) Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(PassportSpacing.md))
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        DateWheelPickerDialog(
+            timestamp = timestamp,
+            onDismiss = { showDatePicker = false },
+            onConfirm = { year, month, day ->
+                timestamp = applyPickerDate(timestamp, year, month, day)
+                showDatePicker = false
+            },
+        )
+    }
+    if (showTimePicker) {
+        TimeWheelPickerDialog(
+            timestamp = timestamp,
+            onDismiss = { showTimePicker = false },
+            onConfirm = { hour, minute, second ->
+                timestamp = applyPickerTime(timestamp, hour, minute, second)
+                showTimePicker = false
+            },
+        )
+    }
+    if (confirmDelete && onDelete != null) ConfirmDeleteDialog(
+        title = "删除这条轨迹？",
+        description = "删除后无法恢复。",
+        onConfirm = onDelete,
+        onDismiss = { confirmDelete = false },
+    )
+    if (mapPickerOpen) coordinateTrack()?.let { value ->
+        MapProviderPickerSheet(
+            onDismiss = { mapPickerOpen = false },
+            onAmap = { mapPickerOpen = false; ExternalMapLauncher.openAmap(context, value) },
+            onGoogle = { mapPickerOpen = false; ExternalMapLauncher.openGoogle(context, value) },
+        )
+    }
+}
+
+@Composable
+private fun DateWheelPickerDialog(
+    timestamp: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (year: Int, month: Int, day: Int) -> Unit,
+) {
+    val initial = remember(timestamp) { Calendar.getInstance().apply { timeInMillis = timestamp } }
+    val initialYear = initial.get(Calendar.YEAR)
+    var year by remember(timestamp) { mutableIntStateOf(initialYear) }
+    var month by remember(timestamp) { mutableIntStateOf(initial.get(Calendar.MONTH) + 1) }
+    var day by remember(timestamp) { mutableIntStateOf(initial.get(Calendar.DAY_OF_MONTH)) }
+    val years = remember(initialYear) { (initialYear - 100..initialYear + 100).toList() }
+    val months = remember { (1..12).toList() }
+    val days = remember(year, month) { (1..daysInMonth(year, month)).toList() }
+    LaunchedEffect(days.size) { day = day.coerceIn(1, days.size) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择日期") },
+        text = {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xxs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                WheelPicker(
+                    values = years,
+                    selectedValue = year,
+                    label = "年份",
+                    display = { "${it}年" },
+                    onSelected = { year = it },
+                    modifier = Modifier.weight(1.35f),
+                )
+                WheelPicker(
+                    values = months,
+                    selectedValue = month,
+                    label = "月份",
+                    display = { "${it}月" },
+                    onSelected = { month = it },
+                    modifier = Modifier.weight(1f),
+                )
+                WheelPicker(
+                    values = days,
+                    selectedValue = day.coerceIn(1, days.size),
+                    label = "日期",
+                    display = { "${it}日" },
+                    onSelected = { day = it },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(year, month, day.coerceIn(1, days.size)) }) { Text("确定") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun TimeWheelPickerDialog(
+    timestamp: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (hour: Int, minute: Int, second: Int) -> Unit,
+) {
+    val initial = remember(timestamp) { Calendar.getInstance().apply { timeInMillis = timestamp } }
+    var hour by remember(timestamp) { mutableIntStateOf(initial.get(Calendar.HOUR_OF_DAY)) }
+    var minute by remember(timestamp) { mutableIntStateOf(initial.get(Calendar.MINUTE)) }
+    var second by remember(timestamp) { mutableIntStateOf(initial.get(Calendar.SECOND)) }
+    val hours = remember { (0..23).toList() }
+    val minuteOrSecond = remember { (0..59).toList() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择时间") },
+        text = {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xxs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                WheelPicker(
+                    values = hours,
+                    selectedValue = hour,
+                    label = "小时",
+                    display = { "%02d时".format(Locale.getDefault(), it) },
+                    onSelected = { hour = it },
+                    modifier = Modifier.weight(1f),
+                )
+                WheelPicker(
+                    values = minuteOrSecond,
+                    selectedValue = minute,
+                    label = "分钟",
+                    display = { "%02d分".format(Locale.getDefault(), it) },
+                    onSelected = { minute = it },
+                    modifier = Modifier.weight(1f),
+                )
+                WheelPicker(
+                    values = minuteOrSecond,
+                    selectedValue = second,
+                    label = "秒",
+                    display = { "%02d秒".format(Locale.getDefault(), it) },
+                    onSelected = { second = it },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(hour, minute, second) }) { Text("确定") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun WheelPicker(
+    values: List<Int>,
+    selectedValue: Int,
+    label: String,
+    display: (Int) -> String,
+    onSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val selectedIndex = values.indexOf(selectedValue).coerceAtLeast(0)
+    val listState = remember(values.firstOrNull(), values.size) {
+        androidx.compose.foundation.lazy.LazyListState(selectedIndex)
+    }
+    val scope = rememberCoroutineScope()
+    val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+    val itemHeight = 48.dp
+
+    LaunchedEffect(listState, values) {
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+            layout.visibleItemsInfo.minByOrNull { item -> abs(item.offset + item.size / 2 - center) }?.index
+        }.distinctUntilChanged().collect { index ->
+            index?.let { values.getOrNull(it) }?.let(onSelected)
+        }
+    }
+
+    Box(
+        modifier.height(itemHeight * 3).semantics {
+            customActions = listOf(
+                CustomAccessibilityAction("增加$label") {
+                    val nextIndex = values.indexOf(selectedValue) + 1
+                    val next = values.getOrNull(nextIndex) ?: return@CustomAccessibilityAction false
+                    onSelected(next)
+                    scope.launch { listState.animateScrollToItem(nextIndex) }
+                    true
+                },
+                CustomAccessibilityAction("减少$label") {
+                    val previousIndex = values.indexOf(selectedValue) - 1
+                    val previous = values.getOrNull(previousIndex) ?: return@CustomAccessibilityAction false
+                    onSelected(previous)
+                    scope.launch { listState.animateScrollToItem(previousIndex) }
+                    true
+                },
+            )
+        },
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(itemHeight).align(Alignment.Center),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+        ) {}
+        LazyColumn(
+            state = listState,
+            flingBehavior = flingBehavior,
+            contentPadding = PaddingValues(vertical = itemHeight),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(values, key = { it }) { value ->
+                Box(Modifier.fillMaxWidth().height(itemHeight), contentAlignment = Alignment.Center) {
+                    Text(
+                        display(value),
+                        style = if (value == selectedValue) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                        color = if (value == selectedValue) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal fun daysInMonth(year: Int, month: Int): Int = Calendar.getInstance().apply {
+    clear()
+    set(Calendar.YEAR, year)
+    set(Calendar.MONTH, month - 1)
+}.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+private fun formatCoordinate(value: Double): String = String.format(Locale.US, "%.6f", value)
+
+internal fun applyPickerDate(timestamp: Long, year: Int, month: Int, day: Int): Long =
+    Calendar.getInstance().apply {
+        timeInMillis = timestamp
+        set(Calendar.YEAR, year)
+        set(Calendar.MONTH, month - 1)
+        set(Calendar.DAY_OF_MONTH, day)
+    }.timeInMillis
+
+internal fun applyPickerTime(timestamp: Long, hour: Int, minute: Int, second: Int): Long =
+    Calendar.getInstance().apply {
+        timeInMillis = timestamp
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, second)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+private fun hasLocationPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+@Suppress("MissingPermission")
+private suspend fun findCurrentLocation(context: Context): Location? {
+    if (!hasLocationPermission(context)) return null
+    val manager = context.getSystemService(LocationManager::class.java)
+    val providers = manager.getProviders(true)
+    if (providers.isEmpty()) return null
+    val preferred = manager.getBestProvider(Criteria().apply { accuracy = Criteria.ACCURACY_FINE }, true)
+        ?: providers.firstOrNull { it == LocationManager.NETWORK_PROVIDER }
+        ?: providers.first()
+    val fallback = providers.mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        .maxByOrNull { it.time }
+    val current = withTimeoutOrNull(15_000L) {
+        suspendCancellableCoroutine { continuation ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val signal = CancellationSignal()
+                continuation.invokeOnCancellation { signal.cancel() }
+                manager.getCurrentLocation(preferred, signal, ContextCompat.getMainExecutor(context)) { location ->
+                    if (continuation.isActive) continuation.resume(location)
+                }
+            } else {
+                val listener = object : LocationListener {
+                    override fun onLocationChanged(location: Location) {
+                        manager.removeUpdates(this)
+                        if (continuation.isActive) continuation.resume(location)
+                    }
+                    override fun onProviderEnabled(provider: String) = Unit
+                    override fun onProviderDisabled(provider: String) = Unit
+                    @Deprecated("Deprecated in Android")
+                    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+                }
+                continuation.invokeOnCancellation { manager.removeUpdates(listener) }
+                manager.requestSingleUpdate(preferred, listener, Looper.getMainLooper())
+            }
+        }
+    }
+    return current ?: fallback
 }
 
 @Composable
@@ -1258,7 +2473,7 @@ private fun TrackEditorScreen(
     BackHandler(onBack = onBack)
     PassportPageScaffold(
         title = "编辑地点",
-        subtitle = "${DateFormat.getDateTimeInstance().format(Date(track.time))} · 精度 ${track.accuracy.toInt()} m",
+        subtitle = "${DateFormat.getDateTimeInstance().format(Date(track.time))} · ${trackAccuracyLabel(track)}",
         onBack = onBack,
         actions = {
             Box {
