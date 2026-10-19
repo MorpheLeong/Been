@@ -1,8 +1,8 @@
 <p align="right"><strong>简体中文</strong> · <a href="README.md">English</a></p>
 
-# AI Passport Android 配套端
+# BugChecking Android 配套端
 
-这是与本仓库 ESP32-C3 AI Passport 固件配套的 Android App，使用 Jetpack Compose 和 Material 3。在 Android Studio 中直接打开 `android-app` 目录；工程使用 AGP 9 的内置 Kotlin 支持，并附带固定版本的 Gradle Wrapper。
+这是与本仓库 ESP32-C3 设备固件配套的 BugChecking Android App，使用 Jetpack Compose 和 Material 3。在 Android Studio 中直接打开 `android-app` 目录；工程使用 AGP 9 的内置 Kotlin 支持，并附带固定版本的 Gradle Wrapper。
 
 命令行构建 Debug APK：
 

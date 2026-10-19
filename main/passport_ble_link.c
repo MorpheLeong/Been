@@ -28,7 +28,7 @@
 
 void ble_store_config_init(void);
 
-#define DEVICE_NAME "AI Passport"
+#define DEVICE_NAME "BugChecking"
 #define PASSPORT_BLE_MAX_ATT_MTU 247U
 #define PASSPORT_BLE_MAX_WRITE_BYTES (PASSPORT_BLE_MAX_ATT_MTU - 3U)
 static const char *TAG = "passport_ble";

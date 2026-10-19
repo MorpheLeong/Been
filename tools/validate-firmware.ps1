@@ -7,12 +7,12 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $environmentScript = Join-Path $PSScriptRoot "codex-env.ps1"
-$buildRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-passport-firmware-" + [guid]::NewGuid().ToString("N"))
+$buildRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("bugchecking-firmware-" + [guid]::NewGuid().ToString("N"))
 $sdkconfigPath = Join-Path $buildRoot "sdkconfig"
-$mergedImage = Join-Path $buildRoot "FoloToy-AI-Passport-full.bin"
+$mergedImage = Join-Path $buildRoot "BugChecking-full.bin"
 $deliveryDirectory = Join-Path $repoRoot "build"
 $archiveDirectory = Join-Path $deliveryDirectory "firmware"
-$deliveryImage = Join-Path $deliveryDirectory "FoloToy-AI-Passport-full.bin"
+$deliveryImage = Join-Path $deliveryDirectory "BugChecking-full.bin"
 $previousSdkconfigDefaults = $env:SDKCONFIG_DEFAULTS
 $previousIdfTarget = $env:IDF_TARGET
 
@@ -55,7 +55,7 @@ finally {
     elseif (Test-Path -LiteralPath $buildRoot) {
         $resolvedBuildRoot = (Resolve-Path -LiteralPath $buildRoot).Path
         $resolvedTempRoot = (Resolve-Path -LiteralPath ([System.IO.Path]::GetTempPath())).Path.TrimEnd('\')
-        $expectedPrefix = "$resolvedTempRoot\ai-passport-firmware-"
+        $expectedPrefix = "$resolvedTempRoot\bugchecking-firmware-"
         if (-not $resolvedBuildRoot.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to remove unexpected build directory: $resolvedBuildRoot"
         }

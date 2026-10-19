@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host tests for safe repository-local AI Passport skill discovery."""
+"""Host tests for safe repository-local BugChecking firmware skill discovery."""
 
 from __future__ import annotations
 

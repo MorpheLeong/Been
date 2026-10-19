@@ -1,4 +1,4 @@
-package com.folotoy.passport
+package com.bugchecking.app
 
 import android.content.ContentValues
 import android.content.Context
@@ -119,11 +119,11 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
         )) }
     }
     @Synchronized fun hasTrack(requestId: String): Boolean = readableDatabase.rawQuery("SELECT 1 FROM tracks WHERE request_id=?", arrayOf(requestId)).use { it.moveToFirst() }
-    @Synchronized fun updateTrack(id: Long, name: String, lat: Double, lon: Double) {
-        require(name.trim().isNotEmpty() && lat in -90.0..90.0 && lon in -180.0..180.0)
+    @Synchronized fun updateTrackName(id: Long, name: String) {
+        require(name.trim().isNotEmpty())
         writableDatabase.execSQL(
-            "UPDATE tracks SET name=?,lat=?,lon=?,provider=?,resolution_state=?,address=NULL,place_id=NULL,original_url=NULL,canonical_url=NULL WHERE id=?",
-            arrayOf<Any>(name.trim().take(100), lat, lon, PlaceProvider.MANUAL.name, PlaceResolutionState.MANUAL_CONFIRMATION.name, id)
+            "UPDATE tracks SET name=?,provider=?,resolution_state=? WHERE id=?",
+            arrayOf<Any>(name.trim().take(100), PlaceProvider.MANUAL.name, PlaceResolutionState.MANUAL_CONFIRMATION.name, id)
         )
     }
     @Synchronized fun updateTrackPlace(id: Long, value: PlaceResolution) {

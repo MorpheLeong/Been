@@ -1,6 +1,6 @@
 ---
 name: passport-build
-description: 验证并打包 FoloToy AI Passport 固件，交付已校验的合并镜像及匹配的调试产物。用于构建、测试和固件打包请求，不执行烧录、提交或发布。
+description: 验证并打包面向 FoloToy AI Passport 硬件的 BugChecking 固件，交付已校验的合并镜像及匹配的调试产物。用于构建、测试和固件打包请求，不执行烧录、提交或发布。
 ---
 
 <p align="right"><strong>简体中文</strong> · <a href="SKILL.md">English</a></p>
@@ -28,7 +28,7 @@ description: 验证并打包 FoloToy AI Passport 固件，交付已校验的合�
 
 ## 确定准确的交付产物
 
-门禁保留 `build/FoloToy-AI-Passport-full.bin`，以及按内容哈希归档的
+门禁保留 `build/BugChecking-full.bin`，以及按内容哈希归档的
 `build/firmware/<full-bin-sha256>/`。交接前运行：
 
 ```text

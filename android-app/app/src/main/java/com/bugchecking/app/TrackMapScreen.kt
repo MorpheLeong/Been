@@ -1,4 +1,4 @@
-package com.folotoy.passport
+package com.bugchecking.app
 
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
@@ -6,7 +6,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,6 +18,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -93,6 +93,7 @@ internal fun TrackMapScreen(
     }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var selected by remember { mutableStateOf<TrackPoint?>(null) }
+    var mapPickerTrack by remember { mutableStateOf<TrackPoint?>(null) }
     var zoom by remember { mutableDoubleStateOf(4.0) }
     var styleAttempt by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
@@ -200,21 +201,42 @@ internal fun TrackMapScreen(
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
             )
-            selected?.let { track ->
-                Card(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(track.name, style = MaterialTheme.typography.titleMedium)
-                        Text("${formatTrackTime(track)} · 精度 ${track.accuracy.toInt()} m", style = MaterialTheme.typography.bodySmall)
-                        track.address?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                        Button(onClick = { onEdit(track) }, modifier = Modifier.fillMaxWidth()) { Text("编辑地点") }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { ExternalMapLauncher.openAmap(context, track) }, modifier = Modifier.weight(1f)) { Text("高德查看") }
-                            OutlinedButton(onClick = { ExternalMapLauncher.openGoogle(context, track) }, modifier = Modifier.weight(1f)) { Text("Google 查看") }
-                        }
-                    }
+        }
+    }
+    selected?.let { track ->
+        ModalBottomSheet(onDismissRequest = { selected = null }) {
+            Column(
+                Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(track.name, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "${formatTrackTime(track)} · 精度 ${track.accuracy.toInt()} m",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(onClick = { onEdit(track) }, modifier = Modifier.fillMaxWidth()) { Text("编辑地点") }
+                OutlinedButton(
+                    onClick = { selected = null; mapPickerTrack = track },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("在地图中查看")
                 }
             }
         }
+    }
+    mapPickerTrack?.let { track ->
+        MapProviderPickerSheet(
+            onDismiss = { mapPickerTrack = null; selected = track },
+            onAmap = {
+                mapPickerTrack = null
+                ExternalMapLauncher.openAmap(context, track)
+            },
+            onGoogle = {
+                mapPickerTrack = null
+                ExternalMapLauncher.openGoogle(context, track)
+            },
+        )
     }
 }
 

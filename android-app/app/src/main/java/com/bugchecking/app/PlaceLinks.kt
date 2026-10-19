@@ -1,4 +1,4 @@
-package com.folotoy.passport
+package com.bugchecking.app
 
 import java.net.HttpURLConnection
 import java.net.URI

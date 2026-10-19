@@ -1,8 +1,8 @@
 <p align="right"><a href="README.zh_CN.md">简体中文</a> · <strong>English</strong></p>
 
-# AI Passport Android companion
+# BugChecking Android companion
 
-This is the Android companion app for the ESP32-C3 AI Passport firmware in this repository. The app uses Jetpack Compose and Material 3. Open the `android-app` directory as a project in Android Studio; the project uses AGP 9 built-in Kotlin support and includes a pinned Gradle Wrapper.
+This is the BugChecking Android companion app for the ESP32-C3 device firmware in this repository. The app uses Jetpack Compose and Material 3. Open the `android-app` directory as a project in Android Studio; the project uses AGP 9 built-in Kotlin support and includes a pinned Gradle Wrapper.
 
 Build the debug APK from the command line:
 

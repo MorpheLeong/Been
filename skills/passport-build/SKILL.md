@@ -1,6 +1,6 @@
 ---
 name: passport-build
-description: Validate and package FoloToy AI Passport firmware, including a verified merged image and matching debugging artifacts. Use for build, test, and firmware-package requests; does not flash, commit, or publish.
+description: Validate and package BugChecking firmware for the FoloToy AI Passport hardware, including a verified merged image and matching debugging artifacts. Use for build, test, and firmware-package requests; does not flash, commit, or publish.
 ---
 
 <p align="right"><a href="SKILL.zh_CN.md">简体中文</a> · <strong>English</strong></p>
@@ -33,7 +33,7 @@ from that checkout; never infer a developer-specific IDF path.
 
 ## Identify the exact deliverable
 
-The gate preserves `build/FoloToy-AI-Passport-full.bin` and a content-addressed
+The gate preserves `build/BugChecking-full.bin` and a content-addressed
 bundle under `build/firmware/<full-bin-sha256>/`. Verify the bundle before
 handoff with:
 

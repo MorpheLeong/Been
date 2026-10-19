@@ -1,4 +1,4 @@
-package com.folotoy.passport
+package com.bugchecking.app
 
 import java.time.Instant
 import java.time.ZoneId
@@ -57,6 +57,28 @@ class PlaceAndImportTest {
         assertTrue(uri.startsWith("androidamap://viewMap?"))
         assertTrue(uri.contains("dev=1"))
         assertTrue(uri.contains("lat=30.1&lon=121.2"))
+    }
+
+    @Test fun nearbyPlacesAreSortedByDistanceAndDeduplicated() {
+        val values = NearbyPlaceCandidates.prepare(
+            listOf(
+                RawNearbyPlace("远处咖啡", latitude = 31.001, longitude = 121.0),
+                RawNearbyPlace("  近处咖啡  ", latitude = 31.0001, longitude = 121.0),
+                RawNearbyPlace("近处 咖啡", latitude = 31.0002, longitude = 121.0),
+                RawNearbyPlace("没有坐标的地点"),
+            ),
+            originLatitude = 31.0,
+            originLongitude = 121.0,
+        )
+
+        assertEquals(listOf("近处咖啡", "远处咖啡", "没有坐标的地点"), values.map { it.name })
+        assertTrue(values[0].distanceMeters!! < values[1].distanceMeters!!)
+        assertEquals(null, values[2].distanceMeters)
+    }
+
+    @Test fun nearbyPlaceDistanceUsesStraightLineMeters() {
+        val distance = NearbyPlaceCandidates.distanceMeters(31.0, 121.0, 31.001, 121.0)
+        assertTrue(distance in 110..112)
     }
 
     @Test fun limitsMapRedirectHostsToHttpsProviders() {

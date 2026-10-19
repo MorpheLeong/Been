@@ -4,14 +4,14 @@ plugins {
 }
 
 android {
-    namespace = "com.folotoy.passport"
+    namespace = "com.bugchecking.app"
     compileSdk {
         version = release(37) {
             minorApiLevel = 0
         }
     }
     defaultConfig {
-        applicationId = "com.folotoy.passport"
+        applicationId = "com.bugchecking.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -22,6 +22,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+base {
+    archivesName.set("BugChecking")
 }
 
 dependencies {
@@ -35,6 +39,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.material3:material3-window-size-class")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("org.maplibre.gl:android-sdk:11.11.0")

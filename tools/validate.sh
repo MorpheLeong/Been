@@ -131,21 +131,21 @@ run_firmware_checks() (
         return 1
     fi
 
-    validation_build_dir="$(mktemp -d /tmp/ai-passport-firmware.XXXXXX)"
-    trap 'case "${validation_build_dir}" in /tmp/ai-passport-firmware.*) rm -rf -- "${validation_build_dir}" ;; esac' EXIT
+    validation_build_dir="$(mktemp -d /tmp/bugchecking-firmware.XXXXXX)"
+    trap 'case "${validation_build_dir}" in /tmp/bugchecking-firmware.*) rm -rf -- "${validation_build_dir}" ;; esac' EXIT
 
     SDKCONFIG_DEFAULTS="${repo_root}/sdkconfig.defaults" \
         "${idf_command[@]}" -B "${validation_build_dir}" \
         -D "SDKCONFIG=${validation_build_dir}/sdkconfig" build
     "${idf_command[@]}" -B "${validation_build_dir}" merge-bin \
-        -o "${validation_build_dir}/FoloToy-AI-Passport-full.bin"
+        -o "${validation_build_dir}/BugChecking-full.bin"
     "${python_bin}" tools/verify_firmware.py "${validation_build_dir}"
     PYTHONDONTWRITEBYTECODE=1 "${python_bin}" tools/archive_firmware.py create \
         "${validation_build_dir}" --archive-root "${repo_root}/build/firmware"
     mkdir -p "${repo_root}/build"
     install -m 0644 \
-        "${validation_build_dir}/FoloToy-AI-Passport-full.bin" \
-        "${repo_root}/build/FoloToy-AI-Passport-full.bin"
+        "${validation_build_dir}/BugChecking-full.bin" \
+        "${repo_root}/build/BugChecking-full.bin"
     echo "Firmware build: PASS"
 )
 

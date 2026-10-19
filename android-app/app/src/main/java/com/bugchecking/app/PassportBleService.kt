@@ -1,4 +1,4 @@
-package com.folotoy.passport
+package com.bugchecking.app
 
 import android.Manifest
 import android.app.Notification
@@ -102,7 +102,7 @@ class PassportBleService : Service() {
                 reconnectAllowed = true
                 reconnects = 0
                 syncWhenConnected = false
-                startForeground(NOTIFICATION_ID, notification("正在连接 AI Passport"))
+                startForeground(NOTIFICATION_ID, notification("正在连接 BugChecking"))
                 if (ready) broadcast(STATE, "已安全连接，等待 Passport 指令") else connectOrScan()
             }
             ACTION_SYNC -> {
@@ -110,7 +110,7 @@ class PassportBleService : Service() {
                 reconnectAllowed = true
                 reconnects = 0
                 syncWhenConnected = true
-                startForeground(NOTIFICATION_ID, notification("正在连接 AI Passport"))
+                startForeground(NOTIFICATION_ID, notification("正在连接 BugChecking"))
                 if (ready) syncSnapshot() else connectOrScan()
             }
             else -> {
@@ -148,7 +148,7 @@ class PassportBleService : Service() {
         if (adapter == null || !adapter.isEnabled) { broadcast(STATE, "请开启蓝牙"); scheduleReconnect(); return }
         if (scanning || gatt != null) return
         val bondedPassport = try {
-            adapter.bondedDevices.firstOrNull { it.name == DEVICE_NAME }
+            adapter.bondedDevices.firstOrNull { it.name in DEVICE_NAMES }
         } catch (_: SecurityException) {
             broadcast(STATE, "蓝牙连接权限被撤销")
             return
@@ -180,7 +180,7 @@ class PassportBleService : Service() {
                 if (result.device.bondState != BluetoothDevice.BOND_BONDED) {
                     reconnectAllowed = false
                     stopScanning()
-                    broadcast(STATE, "请先在系统蓝牙设置中配对 AI Passport")
+                    broadcast(STATE, "请先在系统蓝牙设置中配对 BugChecking")
                     return
                 }
                 connectDevice(result.device, "已发现 Passport，正在连接")
@@ -221,7 +221,7 @@ class PassportBleService : Service() {
                         else -> {
                             reconnectAllowed = false
                             closeConnection()
-                            broadcast(STATE, "请先在系统蓝牙设置中配对 AI Passport")
+                            broadcast(STATE, "请先在系统蓝牙设置中配对 BugChecking")
                         }
                     }
                 }
@@ -772,29 +772,29 @@ class PassportBleService : Service() {
     }
     private fun createNotificationChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "AI Passport 连接", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_ID, "BugChecking 连接", NotificationManager.IMPORTANCE_LOW)
         )
     }
     private fun notification(text: String): Notification {
         val stop = Intent(this, PassportBleService::class.java).setAction(ACTION_STOP)
         val pending = android.app.PendingIntent.getService(this, 1, stop, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL_ID).setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("AI Passport").setContentText(text)
+            .setContentTitle("BugChecking").setContentText(text)
             .addAction(Notification.Action.Builder(null, "断开", pending).build())
             .setOngoing(true).build()
     }
     companion object {
-        const val ACTION_START = "com.folotoy.passport.START_BLE"
-        const val ACTION_STOP = "com.folotoy.passport.STOP_BLE"
-        const val ACTION_SYNC = "com.folotoy.passport.SYNC"
-        const val STATE = "com.folotoy.passport.BLE_STATE"
+        const val ACTION_START = "com.bugchecking.app.START_BLE"
+        const val ACTION_STOP = "com.bugchecking.app.STOP_BLE"
+        const val ACTION_SYNC = "com.bugchecking.app.SYNC"
+        const val STATE = "com.bugchecking.app.BLE_STATE"
         const val EXTRA_STATE = "state"
         const val EXTRA_CONNECTED = "connected"
         const val EXTRA_DATA_CHANGED = "data_changed"
         private const val TAG = "PassportBleService"
         private const val CHANNEL_ID = "passport_ble"
         private const val NOTIFICATION_ID = 40
-        private const val DEVICE_NAME = "AI Passport"
+        private val DEVICE_NAMES = setOf("BugChecking", "AI Passport")
         private const val DISCOVERY_TIMEOUT_MS = 15_000L
         private const val DEFAULT_ATT_MTU = 23
         private const val PREFERRED_ATT_MTU = 247
