@@ -49,11 +49,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
@@ -85,6 +87,7 @@ import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
@@ -173,10 +176,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -1761,6 +1767,300 @@ private fun PickerField(
     }
 }
 
+@Composable
+private fun TrackFieldPair(
+    first: @Composable (Modifier) -> Unit,
+    second: @Composable (Modifier) -> Unit,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val stacked = shouldStackTrackFields(maxWidth.value, fontScale)
+        if (stacked) {
+            Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                first(Modifier.fillMaxWidth())
+                second(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+            ) {
+                first(Modifier.weight(1f))
+                second(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadOnlyTrackField(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier.heightIn(min = 64.dp).clearAndSetSemantics {
+            contentDescription = "$label，$value，只读"
+        },
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = PassportSpacing.md, vertical = PassportSpacing.xs),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun TrackNearbyPlacesSection(
+    name: String,
+    places: List<NearbyPlaceCandidate>,
+    loading: Boolean,
+    expanded: Boolean,
+    emptyMessage: String?,
+    idleActionLabel: String,
+    onToggle: () -> Unit,
+    onSelect: (NearbyPlaceCandidate) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("附近地点", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            val status = when {
+                loading -> "正在查找"
+                places.isNotEmpty() -> "已找到 ${places.size} 个候选"
+                !emptyMessage.isNullOrBlank() -> emptyMessage
+                else -> null
+            }
+            if (status != null) Text(
+                status,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (!loading) TextButton(onClick = onToggle) {
+            Text(if (places.isNotEmpty()) if (expanded) "收起" else "展开" else idleActionLabel)
+        }
+    }
+    if (loading) Row(
+        Modifier.fillMaxWidth().padding(vertical = PassportSpacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        Text("正在查找附近名称…", style = MaterialTheme.typography.bodyMedium)
+    }
+    AnimatedVisibility(visible = expanded && places.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
+            places.forEach { candidate ->
+                val selected = name.trim() == candidate.name
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (selected) MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth().selectable(
+                        selected = selected,
+                        role = Role.RadioButton,
+                        onClick = { onSelect(candidate) },
+                    ),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = PassportSpacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected, onClick = null)
+                        Text(candidate.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        Text(
+                            formatNearbyDistance(candidate.distanceMeters),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = PassportSpacing.xs),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    }
+}
+
+@Composable
+private fun TrackToolRow(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = PassportSpacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun TrackMapToolsSection(
+    mapEnabled: Boolean,
+    linkExpanded: Boolean,
+    linkText: String,
+    parsingLink: Boolean,
+    onOpenMap: () -> Unit,
+    onToggleLink: () -> Unit,
+    onLinkTextChange: (String) -> Unit,
+    onParseLink: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+    Text("地图与名称识别", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column {
+            TrackToolRow(Icons.Default.Map, "在地图中查看", enabled = mapEnabled, onClick = onOpenMap)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            TrackToolRow(
+                Icons.Default.Link,
+                if (linkExpanded) "收起地图分享识别" else "从地图分享内容识别",
+                onClick = onToggleLink,
+            )
+        }
+    }
+    AnimatedVisibility(visible = linkExpanded) {
+        Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+            OutlinedTextField(
+                value = linkText,
+                onValueChange = onLinkTextChange,
+                label = { Text("粘贴高德或 Google Maps 分享内容") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            FilledTonalButton(
+                onClick = onParseLink,
+                enabled = linkText.isNotBlank() && !parsingLink,
+                modifier = Modifier.align(Alignment.End),
+            ) { Text(if (parsingLink) "解析中…" else "识别名称") }
+        }
+    }
+    }
+}
+
+@Composable
+private fun TrackEditorPage(
+    title: String,
+    subtitle: String,
+    primaryActionLabel: String,
+    name: String,
+    onNameChange: (String) -> Unit,
+    onBack: () -> Unit,
+    onSave: () -> Unit,
+    onDelete: (() -> Unit)?,
+    recordInfo: @Composable () -> Unit,
+    nearbyPlaces: List<NearbyPlaceCandidate>,
+    nearbyLoading: Boolean,
+    nearbyExpanded: Boolean,
+    nearbyEmptyMessage: String?,
+    nearbyIdleActionLabel: String,
+    onToggleNearby: () -> Unit,
+    onSelectNearby: (NearbyPlaceCandidate) -> Unit,
+    mapEnabled: Boolean,
+    onOpenMap: () -> Unit,
+    linkExpanded: Boolean,
+    linkText: String,
+    parsingLink: Boolean,
+    onToggleLink: () -> Unit,
+    onLinkTextChange: (String) -> Unit,
+    onParseLink: () -> Unit,
+    feedback: String,
+    feedbackIsError: Boolean,
+) {
+    var moreMenuOpen by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    BackHandler(onBack = onBack)
+    PassportPageScaffold(
+        title = title,
+        subtitle = subtitle,
+        onBack = onBack,
+        actions = {
+            if (onDelete != null) Box {
+                IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Default.MoreVert, "更多操作") }
+                DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("删除这条轨迹", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                        onClick = { moreMenuOpen = false; confirmDelete = true },
+                    )
+                }
+            }
+        },
+        primaryActionLabel = primaryActionLabel,
+        onPrimaryAction = onSave,
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                Modifier.fillMaxSize().widthIn(max = PassportSpacing.formMaxWidth).align(Alignment.TopCenter)
+                    .verticalScroll(rememberScrollState()).padding(PassportSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    label = { Text("地点名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                recordInfo()
+                TrackNearbyPlacesSection(
+                    name = name,
+                    places = nearbyPlaces,
+                    loading = nearbyLoading,
+                    expanded = nearbyExpanded,
+                    emptyMessage = nearbyEmptyMessage,
+                    idleActionLabel = nearbyIdleActionLabel,
+                    onToggle = onToggleNearby,
+                    onSelect = onSelectNearby,
+                )
+                TrackMapToolsSection(
+                    mapEnabled = mapEnabled,
+                    linkExpanded = linkExpanded,
+                    linkText = linkText,
+                    parsingLink = parsingLink,
+                    onOpenMap = onOpenMap,
+                    onToggleLink = onToggleLink,
+                    onLinkTextChange = onLinkTextChange,
+                    onParseLink = onParseLink,
+                )
+                if (feedback.isNotBlank()) Text(
+                    feedback,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (feedbackIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(PassportSpacing.md))
+            }
+        }
+    }
+    if (confirmDelete && onDelete != null) ConfirmDeleteDialog(
+        title = "删除这条轨迹？",
+        description = "删除后，这条轨迹的名称、时间和位置记录都会从手机中移除，且无法恢复。",
+        onConfirm = onDelete,
+        onDismiss = { confirmDelete = false },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ManualTrackEditorScreen(
@@ -1787,17 +2087,16 @@ private fun ManualTrackEditorScreen(
     var initialLocationRequested by rememberSaveable(track?.id) { mutableStateOf(track != null) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
-    var moreMenuOpen by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
     var locating by remember { mutableStateOf(false) }
     var locateRequest by remember { mutableIntStateOf(0) }
     var locationMessage by rememberSaveable(track?.id) { mutableStateOf("") }
-    var message by remember { mutableStateOf("") }
-    var messageIsError by remember { mutableStateOf(false) }
+    var message by rememberSaveable(track?.id) { mutableStateOf("") }
+    var messageIsError by rememberSaveable(track?.id) { mutableStateOf(false) }
     var nearbyPlaces by remember { mutableStateOf<List<NearbyPlaceCandidate>>(emptyList()) }
     var nearbyLoading by remember { mutableStateOf(false) }
-    var nearbyExpanded by remember { mutableStateOf(false) }
-    var linkToolsExpanded by remember { mutableStateOf(false) }
+    var nearbyExpanded by rememberSaveable(track?.id) { mutableStateOf(false) }
+    var nearbyMessage by rememberSaveable(track?.id) { mutableStateOf("") }
+    var linkToolsExpanded by rememberSaveable(track?.id) { mutableStateOf(false) }
     var linkText by rememberSaveable(track?.id) { mutableStateOf(track?.originalUrl.orEmpty()) }
     var parsingLink by remember { mutableStateOf(false) }
     var mapPickerOpen by remember { mutableStateOf(false) }
@@ -1832,12 +2131,12 @@ private fun ManualTrackEditorScreen(
             return
         }
         nearbyLoading = true
-        message = ""
+        nearbyMessage = ""
         scope.launch {
             runCatching { loadNearbyPlaces(context, coordinate) }
                 .onSuccess { values ->
                     nearbyPlaces = values
-                    nearbyExpanded = values.isNotEmpty()
+                    nearbyExpanded = false
                     if (selectFirstWhenUnnamed && name.isBlank()) values.firstOrNull()?.let { candidate ->
                         name = candidate.name
                         provider = PlaceProvider.SYSTEM
@@ -1845,13 +2144,11 @@ private fun ManualTrackEditorScreen(
                         resolutionState = PlaceResolutionState.PARTIAL
                     }
                     if (values.isEmpty()) {
-                        message = "附近没有可用的地点名称，可继续手动输入"
-                        messageIsError = false
+                        nearbyMessage = "附近没有可用的地点名称，可继续手动输入"
                     }
                 }
                 .onFailure {
-                    message = "附近地点加载失败，可继续手动输入"
-                    messageIsError = false
+                    nearbyMessage = "附近地点加载失败，可继续手动输入"
                 }
             nearbyLoading = false
         }
@@ -1945,167 +2242,94 @@ private fun ManualTrackEditorScreen(
 
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-    BackHandler(onBack = onBack)
-    PassportPageScaffold(
-        title = if (track == null) "添加轨迹" else "编辑轨迹",
-        subtitle = if (accuracy > 0f) "当前位置精度 ${accuracy.toInt()} m" else "时间与坐标可手动调整",
+    val mode = if (track == null) TrackEditorMode.CREATE_MANUAL else TrackEditorMode.EDIT_MANUAL
+    val capabilities = mode.capabilities()
+    val subtitle = when {
+        track == null && locationMessage.startsWith("已获取当前位置") -> locationMessage
+        track == null -> "手动记录 · 默认使用当前位置，可随时修改"
+        accuracy > 0f -> "手动记录 · 定位精度 ${accuracy.toInt()} m"
+        else -> "手动记录 · 手动坐标"
+    }
+    TrackEditorPage(
+        title = mode.title(),
+        subtitle = subtitle,
+        primaryActionLabel = mode.primaryActionLabel(),
+        name = name,
+        onNameChange = {
+            name = it
+            provider = PlaceProvider.MANUAL
+            resolutionState = PlaceResolutionState.MANUAL_CONFIRMATION
+        },
         onBack = onBack,
-        actions = {
-            if (onDelete != null) {
-                Box {
-                    IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Default.MoreVert, "更多操作") }
-                    DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("删除这条轨迹", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = { moreMenuOpen = false; confirmDelete = true },
-                        )
-                    }
+        onSave = ::save,
+        onDelete = onDelete.takeIf { capabilities.canDelete },
+        recordInfo = {
+            Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+            Text("记录信息", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            TrackFieldPair(
+                first = { modifier -> PickerField("日期", dateFormat.format(Date(timestamp)), { showDatePicker = true }, modifier) },
+                second = { modifier -> PickerField("时间", timeFormat.format(Date(timestamp)), { showTimePicker = true }, modifier) },
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("坐标", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                FilledTonalButton(onClick = ::requestLocationPermissionOrLocate, enabled = !locating) {
+                    Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(PassportSpacing.xxs))
+                    Text(if (locating) "定位中…" else "重新定位")
                 }
             }
-        },
-        primaryActionLabel = "保存轨迹",
-        onPrimaryAction = ::save,
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            Column(
-                Modifier.fillMaxSize().widthIn(max = PassportSpacing.formMaxWidth).align(Alignment.TopCenter)
-                    .verticalScroll(rememberScrollState()).padding(PassportSpacing.md),
-                verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = {
-                        name = it
-                        provider = PlaceProvider.MANUAL
-                        resolutionState = PlaceResolutionState.MANUAL_CONFIRMATION
-                    },
-                    label = { Text("地点名称") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
-                ) {
-                    PickerField(
-                        label = "日期",
-                        value = dateFormat.format(Date(timestamp)),
-                        onClick = { showDatePicker = true },
-                        modifier = Modifier.weight(1f),
-                    )
-                    PickerField(
-                        label = "时间",
-                        value = timeFormat.format(Date(timestamp)),
-                        onClick = { showTimePicker = true },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("坐标", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    FilledTonalButton(onClick = ::requestLocationPermissionOrLocate, enabled = !locating) {
-                        Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(PassportSpacing.xxs))
-                        Text(if (locating) "定位中…" else "重新定位")
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+            TrackFieldPair(
+                first = { modifier ->
                     OutlinedTextField(
                         value = latitude,
                         onValueChange = { latitude = it; accuracy = 0f },
                         label = { Text("纬度") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
-                        modifier = Modifier.weight(1f),
+                        modifier = modifier,
                     )
+                },
+                second = { modifier ->
                     OutlinedTextField(
                         value = longitude,
                         onValueChange = { longitude = it; accuracy = 0f },
                         label = { Text("经度") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
-                        modifier = Modifier.weight(1f),
+                        modifier = modifier,
                     )
-                }
-                if (locationMessage.isNotBlank()) Text(
-                    locationMessage,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("附近地点", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { if (nearbyPlaces.isEmpty()) findNearby() else nearbyExpanded = !nearbyExpanded }) {
-                        Text(if (nearbyPlaces.isNotEmpty() && nearbyExpanded) "收起" else if (nearbyPlaces.isNotEmpty()) "展开" else "查找")
-                    }
-                }
-                if (nearbyLoading) Row(horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Text("正在查找附近名称…", style = MaterialTheme.typography.bodyMedium)
-                }
-                if (nearbyExpanded) Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
-                    nearbyPlaces.forEach { candidate ->
-                        Surface(
-                            onClick = {
-                                name = candidate.name
-                                provider = PlaceProvider.SYSTEM
-                                address = candidate.address
-                                resolutionState = PlaceResolutionState.PARTIAL
-                            },
-                            shape = MaterialTheme.shapes.medium,
-                            color = if (name.trim() == candidate.name) MaterialTheme.colorScheme.secondaryContainer
-                                else MaterialTheme.colorScheme.surfaceContainerLow,
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = PassportSpacing.xs),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                RadioButton(selected = name.trim() == candidate.name, onClick = null)
-                                Text(candidate.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                                Text(formatNearbyDistance(candidate.distanceMeters), style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = { mapPickerOpen = true },
-                    enabled = coordinateTrack() != null,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Map, null)
-                    Spacer(Modifier.width(PassportSpacing.xs))
-                    Text("在地图中查看")
-                }
-                TextButton(onClick = { linkToolsExpanded = !linkToolsExpanded }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Link, null)
-                    Spacer(Modifier.width(PassportSpacing.xs))
-                    Text(if (linkToolsExpanded) "收起地图链接" else "从地图分享内容识别")
-                }
-                if (linkToolsExpanded) {
-                    OutlinedTextField(
-                        value = linkText,
-                        onValueChange = { linkText = it },
-                        label = { Text("高德或 Google Maps 分享内容") },
-                        minLines = 2,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    FilledTonalButton(
-                        onClick = ::parseLink,
-                        enabled = linkText.isNotBlank() && !parsingLink,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(if (parsingLink) "解析中…" else "识别名称") }
-                }
-                if (message.isNotBlank()) Text(
-                    message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(PassportSpacing.md))
+                },
+            )
+            if (locationMessage.isNotBlank()) Text(
+                locationMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             }
-        }
-    }
+        },
+        nearbyPlaces = nearbyPlaces,
+        nearbyLoading = nearbyLoading,
+        nearbyExpanded = nearbyExpanded,
+        nearbyEmptyMessage = nearbyMessage,
+        nearbyIdleActionLabel = "查找",
+        onToggleNearby = { if (nearbyPlaces.isEmpty()) findNearby() else nearbyExpanded = !nearbyExpanded },
+        onSelectNearby = { candidate ->
+            name = candidate.name
+            provider = PlaceProvider.SYSTEM
+            address = candidate.address
+            resolutionState = PlaceResolutionState.PARTIAL
+        },
+        mapEnabled = coordinateTrack() != null,
+        onOpenMap = { mapPickerOpen = true },
+        linkExpanded = linkToolsExpanded,
+        linkText = linkText,
+        parsingLink = parsingLink,
+        onToggleLink = { linkToolsExpanded = !linkToolsExpanded },
+        onLinkTextChange = { linkText = it },
+        onParseLink = ::parseLink,
+        feedback = message,
+        feedbackIsError = messageIsError,
+    )
 
     if (showDatePicker) {
         DateWheelPickerDialog(
@@ -2127,12 +2351,6 @@ private fun ManualTrackEditorScreen(
             },
         )
     }
-    if (confirmDelete && onDelete != null) ConfirmDeleteDialog(
-        title = "删除这条轨迹？",
-        description = "删除后无法恢复。",
-        onConfirm = onDelete,
-        onDismiss = { confirmDelete = false },
-    )
     if (mapPickerOpen) coordinateTrack()?.let { value ->
         MapProviderPickerSheet(
             onDismiss = { mapPickerOpen = false },
@@ -2402,21 +2620,65 @@ private fun TrackEditorScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var name by remember(track.id) { mutableStateOf(track.name) }
-    var stagedPlace by remember(track.id) { mutableStateOf<PlaceResolution?>(null) }
-    var message by remember(track.id) { mutableStateOf("") }
-    var messageIsError by remember(track.id) { mutableStateOf(false) }
+    var name by rememberSaveable(track.id) { mutableStateOf(track.name) }
+    var stagedProvider by rememberSaveable(track.id) { mutableStateOf<String?>(null) }
+    var stagedAddress by rememberSaveable(track.id) { mutableStateOf<String?>(null) }
+    var stagedLatitude by rememberSaveable(track.id) { mutableStateOf<Double?>(null) }
+    var stagedLongitude by rememberSaveable(track.id) { mutableStateOf<Double?>(null) }
+    var stagedPlaceId by rememberSaveable(track.id) { mutableStateOf<String?>(null) }
+    var stagedOriginalUrl by rememberSaveable(track.id) { mutableStateOf<String?>(null) }
+    var stagedCanonicalUrl by rememberSaveable(track.id) { mutableStateOf<String?>(null) }
+    var stagedResolutionState by rememberSaveable(track.id) { mutableStateOf<String?>(null) }
+    var message by rememberSaveable(track.id) { mutableStateOf("") }
+    var messageIsError by rememberSaveable(track.id) { mutableStateOf(false) }
     var nearbyPlaces by remember(track.id) { mutableStateOf<List<NearbyPlaceCandidate>>(emptyList()) }
     var nearbyLoading by remember(track.id) { mutableStateOf(true) }
     var nearbyError by remember(track.id) { mutableStateOf<String?>(null) }
-    var nearbyExpanded by remember(track.id) { mutableStateOf(false) }
-    var nearbyReload by remember(track.id) { mutableIntStateOf(0) }
+    var nearbyExpanded by rememberSaveable(track.id) { mutableStateOf(false) }
+    var nearbyReload by rememberSaveable(track.id) { mutableIntStateOf(0) }
     var mapPickerOpen by remember(track.id) { mutableStateOf(false) }
-    var linkToolsExpanded by remember(track.id, initialLink) { mutableStateOf(!initialLink.isNullOrBlank()) }
-    var linkText by remember(track.id, initialLink) { mutableStateOf(initialLink ?: track.originalUrl.orEmpty()) }
+    var linkToolsExpanded by rememberSaveable(track.id, initialLink) { mutableStateOf(!initialLink.isNullOrBlank()) }
+    var linkText by rememberSaveable(track.id, initialLink) { mutableStateOf(initialLink ?: track.originalUrl.orEmpty()) }
     var parsingLink by remember { mutableStateOf(false) }
-    var moreMenuOpen by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
+
+    fun stagedPlace(): PlaceResolution? {
+        val provider = stagedProvider?.let { runCatching { PlaceProvider.valueOf(it) }.getOrNull() } ?: return null
+        val state = stagedResolutionState?.let { runCatching { PlaceResolutionState.valueOf(it) }.getOrNull() }
+            ?: PlaceResolutionState.PARTIAL
+        return PlaceResolution(
+            provider = provider,
+            name = name.trim().ifBlank { null },
+            address = stagedAddress,
+            latitude = stagedLatitude,
+            longitude = stagedLongitude,
+            placeId = stagedPlaceId,
+            originalUrl = stagedOriginalUrl,
+            canonicalUrl = stagedCanonicalUrl,
+            state = state,
+        )
+    }
+
+    fun stagePlace(place: PlaceResolution) {
+        stagedProvider = place.provider.name
+        stagedAddress = place.address
+        stagedLatitude = place.latitude
+        stagedLongitude = place.longitude
+        stagedPlaceId = place.placeId
+        stagedOriginalUrl = place.originalUrl
+        stagedCanonicalUrl = place.canonicalUrl
+        stagedResolutionState = place.state.name
+    }
+
+    fun clearStagedPlace() {
+        stagedProvider = null
+        stagedAddress = null
+        stagedLatitude = null
+        stagedLongitude = null
+        stagedPlaceId = null
+        stagedOriginalUrl = null
+        stagedCanonicalUrl = null
+        stagedResolutionState = null
+    }
 
     fun parseLink() {
         if (linkText.isBlank() || parsingLink) return
@@ -2426,7 +2688,7 @@ private fun TrackEditorScreen(
             val result = runCatching { resolveSharedPlace(linkText) }
             parsingLink = false
             result.onSuccess { place ->
-                stagedPlace = place
+                stagePlace(place)
                 name = place.name.orEmpty()
                 linkToolsExpanded = false
                 message = "已填入地图识别到的名称，打卡坐标保持不变"
@@ -2444,7 +2706,7 @@ private fun TrackEditorScreen(
             message = "请输入地点名称"
             messageIsError = true
         } else {
-            val place = stagedPlace
+            val place = stagedPlace()
             if (place != null) onApplyPlace(place.copy(name = cleanName)) else onSave(cleanName)
         }
     }
@@ -2470,174 +2732,82 @@ private fun TrackEditorScreen(
         if (!initialLink.isNullOrBlank()) parseLink()
     }
 
-    BackHandler(onBack = onBack)
-    PassportPageScaffold(
-        title = "编辑地点",
-        subtitle = "${DateFormat.getDateTimeInstance().format(Date(track.time))} · ${trackAccuracyLabel(track)}",
+    val mode = TrackEditorMode.EDIT_CHECK_IN
+    val capabilities = mode.capabilities()
+    val shortDate = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val shortTime = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val headerDateTime = remember(track.time) {
+        SimpleDateFormat("M月d日 HH:mm", Locale.getDefault()).format(Date(track.time))
+    }
+    TrackEditorPage(
+        title = mode.title(),
+        subtitle = "设备打卡 · $headerDateTime · ${trackAccuracyLabel(track)}",
+        primaryActionLabel = mode.primaryActionLabel(),
+        name = name,
+        onNameChange = {
+            name = it
+            clearStagedPlace()
+            message = ""
+        },
         onBack = onBack,
-        actions = {
-            Box {
-                IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Default.MoreVert, "更多操作") }
-                DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("删除这条轨迹", color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                        onClick = { moreMenuOpen = false; confirmDelete = true },
-                    )
-                }
+        onSave = ::save,
+        onDelete = onDelete.takeIf { capabilities.canDelete },
+        recordInfo = {
+            Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("记录信息", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                IconButton(onClick = {
+                    context.getSystemService(ClipboardManager::class.java)
+                        .setPrimaryClip(ClipData.newPlainText("轨迹坐标", "${track.lat}, ${track.lon}"))
+                    Toast.makeText(context, "坐标已复制", Toast.LENGTH_SHORT).show()
+                }) { Icon(Icons.Default.ContentCopy, contentDescription = "复制坐标") }
+            }
+            TrackFieldPair(
+                first = { modifier -> ReadOnlyTrackField("日期", shortDate.format(Date(track.time)), modifier) },
+                second = { modifier -> ReadOnlyTrackField("时间", shortTime.format(Date(track.time)), modifier) },
+            )
+            TrackFieldPair(
+                first = { modifier -> ReadOnlyTrackField("纬度", formatCoordinate(track.lat), modifier) },
+                second = { modifier -> ReadOnlyTrackField("经度", formatCoordinate(track.lon), modifier) },
+            )
+            Text(
+                "设备打卡的时间与坐标不可修改",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             }
         },
-        primaryActionLabel = "保存地点名称",
-        onPrimaryAction = ::save,
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            Column(
-                Modifier.fillMaxSize().widthIn(max = PassportSpacing.formMaxWidth).align(Alignment.TopCenter)
-                    .verticalScroll(rememberScrollState()).padding(horizontal = PassportSpacing.md, vertical = PassportSpacing.md),
-                verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
-            ) {
-                OutlinedTextField(
-                    name,
-                    {
-                        name = it
-                        stagedPlace = null
-                        message = ""
-                    },
-                    label = { Text("地点名称") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+        nearbyPlaces = nearbyPlaces,
+        nearbyLoading = nearbyLoading,
+        nearbyExpanded = nearbyExpanded,
+        nearbyEmptyMessage = nearbyError,
+        nearbyIdleActionLabel = "重试",
+        onToggleNearby = { if (nearbyPlaces.isEmpty()) nearbyReload++ else nearbyExpanded = !nearbyExpanded },
+        onSelectNearby = { candidate ->
+            name = candidate.name
+            stagePlace(
+                PlaceResolution(
+                    provider = PlaceProvider.SYSTEM,
+                    name = candidate.name,
+                    address = candidate.address,
+                    latitude = candidate.latitude,
+                    longitude = candidate.longitude,
+                    state = PlaceResolutionState.PARTIAL,
                 )
-
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("附近地点", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        if (!nearbyLoading && nearbyPlaces.isNotEmpty()) {
-                            Text(
-                                "已找到 ${nearbyPlaces.size} 个候选",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    if (!nearbyLoading && nearbyPlaces.isNotEmpty()) {
-                        TextButton(onClick = { nearbyExpanded = !nearbyExpanded }) {
-                            Text(if (nearbyExpanded) "收起" else "展开")
-                        }
-                    }
-                }
-                when {
-                    nearbyLoading -> Row(
-                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("正在查找附近名称…", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    nearbyPlaces.isNotEmpty() -> {
-                        if (nearbyExpanded) {
-                            Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
-                                nearbyPlaces.forEach { candidate ->
-                                    val selected = name.trim() == candidate.name
-                                    Surface(
-                                        onClick = {
-                                            name = candidate.name
-                                            stagedPlace = PlaceResolution(
-                                                provider = PlaceProvider.SYSTEM,
-                                                name = candidate.name,
-                                                address = candidate.address,
-                                                latitude = candidate.latitude,
-                                                longitude = candidate.longitude,
-                                                state = PlaceResolutionState.PARTIAL,
-                                            )
-                                            message = ""
-                                        },
-                                        shape = MaterialTheme.shapes.medium,
-                                        color = if (selected) MaterialTheme.colorScheme.secondaryContainer
-                                            else MaterialTheme.colorScheme.surfaceContainerLow,
-                                    ) {
-                                        Row(
-                                            Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                                                .padding(horizontal = PassportSpacing.xs),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            RadioButton(selected = selected, onClick = null)
-                                            Text(candidate.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                                            Text(
-                                                formatNearbyDistance(candidate.distanceMeters),
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(start = PassportSpacing.xs),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(nearbyError.orEmpty(), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { nearbyReload++ }) { Text("重试") }
-                    }
-                }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Text("实际打卡位置", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatTrackCoordinates(track), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = {
-                        context.getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(ClipData.newPlainText("轨迹坐标", "${track.lat}, ${track.lon}"))
-                        Toast.makeText(context, "坐标已复制", Toast.LENGTH_SHORT).show()
-                    }) { Text("复制") }
-                }
-                OutlinedButton(onClick = { mapPickerOpen = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Map, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("在地图中查看")
-                }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                TextButton(onClick = { linkToolsExpanded = !linkToolsExpanded }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Link, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (linkToolsExpanded) "收起地图链接" else "从地图分享内容识别")
-                }
-                if (linkToolsExpanded) {
-                    OutlinedTextField(
-                        linkText,
-                        {
-                            linkText = it
-                            message = ""
-                        },
-                        label = { Text("粘贴高德或 Google Maps 分享内容") },
-                        minLines = 2,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    FilledTonalButton(
-                        onClick = ::parseLink,
-                        enabled = linkText.isNotBlank() && !parsingLink,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(if (parsingLink) "解析中…" else "识别名称") }
-                }
-                if (message.isNotEmpty()) {
-                    Text(
-                        message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.size(PassportSpacing.md))
-            }
-        }
-    }
-    if (confirmDelete) ConfirmDeleteDialog(
-        title = "删除这条轨迹？",
-        description = "删除后无法恢复，实际打卡坐标和地点名称都会被移除。",
-        onConfirm = onDelete,
-        onDismiss = { confirmDelete = false },
+            )
+            message = ""
+        },
+        mapEnabled = true,
+        onOpenMap = { mapPickerOpen = true },
+        linkExpanded = linkToolsExpanded,
+        linkText = linkText,
+        parsingLink = parsingLink,
+        onToggleLink = { linkToolsExpanded = !linkToolsExpanded },
+        onLinkTextChange = { linkText = it; message = "" },
+        onParseLink = ::parseLink,
+        feedback = message,
+        feedbackIsError = messageIsError,
     )
     if (mapPickerOpen) MapProviderPickerSheet(
         onDismiss = { mapPickerOpen = false },

@@ -82,6 +82,30 @@ class PrimaryPagesTest {
         }
     }
 
+    @Test fun trackEditorModesShareOneEntityLanguageButKeepSourceCapabilities() {
+        assertEquals("添加轨迹", TrackEditorMode.CREATE_MANUAL.title())
+        assertEquals("编辑轨迹", TrackEditorMode.EDIT_MANUAL.title())
+        assertEquals("编辑轨迹", TrackEditorMode.EDIT_CHECK_IN.title())
+        assertEquals("保存更改", TrackEditorMode.EDIT_CHECK_IN.primaryActionLabel())
+
+        val checkIn = TrackEditorMode.EDIT_CHECK_IN.capabilities()
+        assertEquals(false, checkIn.canEditTimestamp)
+        assertEquals(false, checkIn.canEditCoordinates)
+        assertEquals(true, checkIn.canDelete)
+
+        val create = TrackEditorMode.CREATE_MANUAL.capabilities()
+        assertEquals(true, create.canEditTimestamp)
+        assertEquals(true, create.canEditCoordinates)
+        assertEquals(true, create.autoLocateOnOpen)
+        assertEquals(false, create.canDelete)
+    }
+
+    @Test fun trackEditorFieldPairsStackForNarrowOrLargeTextLayouts() {
+        assertEquals(false, shouldStackTrackFields(maxWidthDp = 400f, fontScale = 1f))
+        assertEquals(true, shouldStackTrackFields(maxWidthDp = 359f, fontScale = 1f))
+        assertEquals(true, shouldStackTrackFields(maxWidthDp = 400f, fontScale = 2f))
+    }
+
     @Test fun unknownAccuracyUsesManualCoordinateLabel() {
         val manual = TrackPoint(1, "manual-1", null, "外滩", 31.23, 121.47, 1L, 0f)
         assertEquals("手动坐标", trackAccuracyLabel(manual))
