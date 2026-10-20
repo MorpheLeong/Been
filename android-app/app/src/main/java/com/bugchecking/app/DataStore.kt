@@ -25,7 +25,21 @@ data class TrackPoint(
 )
 enum class TrackEntrySource { CHECK_IN, MANUAL }
 data class Destination(val id: String, val name: String, val order: Int, val done: Boolean, val qrId: String?)
-data class PassportQr(val id: String, val name: String, val payload: String, val starred: Boolean)
+data class PassportQr(
+    val id: String,
+    val name: String,
+    val payload: String,
+    val starred: Boolean,
+    val createdOrder: Long = 0L,
+    val starredOrder: Long? = null,
+)
+
+internal fun orderQrsForDisplay(values: List<PassportQr>): List<PassportQr> = values.sortedWith(
+    compareBy<PassportQr>(
+        { if (it.starred) 0 else 1 },
+        { if (it.starred) it.starredOrder ?: it.createdOrder else it.createdOrder },
+    ),
+)
 data class PassportProfile(
     val nickname: String = "",
     val bio: String = "",
@@ -34,11 +48,11 @@ data class PassportProfile(
 )
 
 /** Local-only store: QR payloads and precise coordinates are never uploaded to Passport. */
-class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", null, 6) {
+class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", null, 7) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE tracks(id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, destination_id TEXT, name TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, time INTEGER NOT NULL, accuracy REAL NOT NULL, provider TEXT NOT NULL DEFAULT 'MANUAL', address TEXT, place_id TEXT, original_url TEXT, canonical_url TEXT, resolution_state TEXT NOT NULL DEFAULT 'MANUAL_CONFIRMATION', entry_source TEXT NOT NULL DEFAULT 'CHECK_IN')")
         db.execSQL("CREATE TABLE destinations(id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0, qr_id TEXT)")
-        db.execSQL("CREATE TABLE qrs(id TEXT PRIMARY KEY, name TEXT NOT NULL, payload TEXT NOT NULL, starred INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE qrs(id TEXT PRIMARY KEY, name TEXT NOT NULL, payload TEXT NOT NULL, starred INTEGER NOT NULL DEFAULT 0, created_order INTEGER NOT NULL DEFAULT 0, starred_order INTEGER)")
         createSettingsTables(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -69,6 +83,19 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
             if ("entry_source" !in trackColumns) {
                 db.execSQL("ALTER TABLE tracks ADD COLUMN entry_source TEXT NOT NULL DEFAULT 'CHECK_IN'")
             }
+        }
+        if (oldVersion < 7) {
+            val qrColumns = db.rawQuery("PRAGMA table_info(qrs)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) }
+            }
+            if ("created_order" !in qrColumns) {
+                db.execSQL("ALTER TABLE qrs ADD COLUMN created_order INTEGER NOT NULL DEFAULT 0")
+            }
+            if ("starred_order" !in qrColumns) {
+                db.execSQL("ALTER TABLE qrs ADD COLUMN starred_order INTEGER")
+            }
+            db.execSQL("UPDATE qrs SET created_order=rowid WHERE created_order=0")
+            db.execSQL("UPDATE qrs SET starred_order=created_order WHERE starred=1 AND starred_order IS NULL")
         }
         val profileColumns = db.rawQuery("PRAGMA table_info(profile)", null).use { c ->
             buildSet { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) }
@@ -117,8 +144,22 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
     @Synchronized fun destinations(): List<Destination> = readableDatabase.rawQuery("SELECT id,name,sort_order,done,qr_id FROM destinations ORDER BY sort_order", null).use { c ->
         buildList { while (c.moveToNext()) add(Destination(c.getString(0), c.getString(1), c.getInt(2), c.getInt(3) != 0, c.getString(4))) }
     }
-    @Synchronized fun qrs(): List<PassportQr> = readableDatabase.rawQuery("SELECT id,name,payload,starred FROM qrs ORDER BY name COLLATE NOCASE", null).use { c ->
-        buildList { while (c.moveToNext()) add(PassportQr(c.getString(0), c.getString(1), c.getString(2), c.getInt(3) != 0)) }
+    @Synchronized fun qrs(): List<PassportQr> = readableDatabase.rawQuery(
+        "SELECT id,name,payload,starred,created_order,starred_order FROM qrs",
+        null,
+    ).use { c ->
+        orderQrsForDisplay(buildList {
+            while (c.moveToNext()) add(
+                PassportQr(
+                    id = c.getString(0),
+                    name = c.getString(1),
+                    payload = c.getString(2),
+                    starred = c.getInt(3) != 0,
+                    createdOrder = c.getLong(4),
+                    starredOrder = if (c.isNull(5)) null else c.getLong(5),
+                ),
+            )
+        })
     }
     @Synchronized fun tracks(): List<TrackPoint> = readableDatabase.rawQuery("SELECT id,request_id,destination_id,name,lat,lon,time,accuracy,provider,address,place_id,original_url,canonical_url,resolution_state,entry_source FROM tracks ORDER BY time DESC LIMIT 300", null).use { c ->
         buildList { while (c.moveToNext()) add(TrackPoint(
@@ -264,9 +305,23 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
     @Synchronized fun addQr(name: String, payload: String, starred: Boolean, id: String? = null): String {
         val cleanName = truncateUtf8(name.trim(), 48); val cleanPayload = payload.trim()
         require(cleanName.isNotEmpty() && cleanPayload.isNotEmpty() && cleanPayload.toByteArray(Charsets.UTF_8).size <= 192)
+        val existing = id?.let { key -> qrs().firstOrNull { it.id == key } }
         if (starred && qrs().count { it.starred && it.id != id } >= 3) error("最多只能星标 3 个二维码")
         val key = id ?: UUID.randomUUID().toString()
-        val values = ContentValues().apply { put("id", key); put("name", cleanName); put("payload", cleanPayload); put("starred", if (starred) 1 else 0) }
+        val createdOrder = existing?.createdOrder ?: nextQrOrder("created_order")
+        val starredOrder = when {
+            !starred -> null
+            existing?.starred == true -> existing.starredOrder ?: nextQrOrder("starred_order")
+            else -> nextQrOrder("starred_order")
+        }
+        val values = ContentValues().apply {
+            put("id", key)
+            put("name", cleanName)
+            put("payload", cleanPayload)
+            put("starred", if (starred) 1 else 0)
+            put("created_order", createdOrder)
+            if (starredOrder == null) putNull("starred_order") else put("starred_order", starredOrder)
+        }
         writableDatabase.insertWithOnConflict("qrs", null, values, SQLiteDatabase.CONFLICT_REPLACE)
         return key
     }
@@ -279,6 +334,12 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
     }
     private fun normalizeOrder() {
         destinations().forEachIndexed { index, item -> writableDatabase.execSQL("UPDATE destinations SET sort_order=? WHERE id=?", arrayOf<Any>(index, item.id)) }
+    }
+    private fun nextQrOrder(column: String): Long {
+        require(column == "created_order" || column == "starred_order")
+        return readableDatabase.rawQuery("SELECT COALESCE(MAX($column), 0) + 1 FROM qrs", null).use { c ->
+            if (c.moveToFirst()) c.getLong(0) else 1L
+        }
     }
     internal fun truncateUtf8(value: String, maxBytes: Int): String {
         val out = StringBuilder(); var bytes = 0

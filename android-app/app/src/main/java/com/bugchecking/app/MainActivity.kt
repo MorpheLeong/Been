@@ -31,6 +31,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
@@ -49,8 +50,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.foundation.scrollableArea
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +80,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -155,6 +161,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -189,6 +196,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.navigation.NavType
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NamedNavArgument
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -337,7 +346,9 @@ private object Routes {
     const val TrackCreate = "track-create"
     const val TrackEdit = "track-edit"
     const val ChecklistImport = "checklist-import"
+    const val QrEdit = "qr-edit"
     const val QrPresent = "qr-present"
+    const val AvatarCrop = "avatar-crop"
 }
 
 private val DetailEnterEasing = CubicBezierEasing(0f, 0f, 0f, 1f)
@@ -346,7 +357,8 @@ private val DetailExitEasing = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 private fun NavBackStackEntry.isSecondaryDestination(): Boolean {
     val route = destination.route.orEmpty()
     return route == Routes.TrackMap || route == Routes.TrackCreate || route == Routes.ChecklistImport ||
-        route.startsWith(Routes.TrackEdit) || route.startsWith(Routes.QrPresent)
+        route.startsWith(Routes.TrackEdit) || route.startsWith(Routes.QrEdit) ||
+        route.startsWith(Routes.QrPresent) || route.startsWith(Routes.AvatarCrop)
 }
 
 private fun detailEnterTransition(): EnterTransition =
@@ -373,6 +385,16 @@ private fun parentReturnTransition(): EnterTransition =
         animationSpec = tween(durationMillis = 250, easing = DetailEnterEasing),
     ) + fadeIn(animationSpec = tween(durationMillis = 200, easing = DetailEnterEasing))
 
+private fun NavGraphBuilder.detailComposable(
+    route: String,
+    arguments: List<NamedNavArgument> = emptyList(),
+    content: @Composable AnimatedContentScope.(NavBackStackEntry) -> Unit,
+) = composable(
+    route = route,
+    arguments = arguments,
+    content = content,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PassportApp(
@@ -389,7 +411,6 @@ private fun PassportApp(
     val context = LocalContext.current
     var revision by remember { mutableIntStateOf(0) }
     var initialImportSource by remember { mutableStateOf<ImportSource?>(null) }
-    var qrCreateRequest by remember { mutableIntStateOf(0) }
     var initialMapLink by remember { mutableStateOf<String?>(null) }
     var pendingMapShare by remember { mutableStateOf<String?>(null) }
     var lastSyncedRevision by remember { mutableIntStateOf(0) }
@@ -453,16 +474,20 @@ private fun PassportApp(
         NavHost(
             navController = navController,
             startDestination = Tab.Tracks.route,
-            enterTransition = { EnterTransition.None },
-            exitTransition = { ExitTransition.None },
-            popEnterTransition = { EnterTransition.None },
-            popExitTransition = { ExitTransition.None },
+            enterTransition = {
+                if (targetState.isSecondaryDestination()) detailEnterTransition() else EnterTransition.None
+            },
+            exitTransition = {
+                if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None
+            },
+            popEnterTransition = {
+                if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None
+            },
+            popExitTransition = {
+                if (initialState.isSecondaryDestination()) detailExitTransition() else ExitTransition.None
+            },
         ) {
-        composable(
-            route = Tab.Tracks.route,
-            exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
-            popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
-        ) {
+        composable(route = Tab.Tracks.route) {
             PassportRootScaffold(
                 Tab.Tracks,
                 compact,
@@ -490,11 +515,7 @@ private fun PassportApp(
                 )
             }
         }
-        composable(
-            route = Tab.Checklist.route,
-            exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
-            popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
-        ) {
+        composable(route = Tab.Checklist.route) {
             PassportRootScaffold(
                 Tab.Checklist,
                 compact,
@@ -511,11 +532,7 @@ private fun PassportApp(
                 ChecklistPage(db, destinations, refresh)
             }
         }
-        composable(
-            route = Tab.Qr.route,
-            exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
-            popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
-        ) {
+        composable(route = Tab.Qr.route) {
             PassportRootScaffold(
                 Tab.Qr,
                 compact,
@@ -524,7 +541,7 @@ private fun PassportApp(
                 ::openTab,
                 if (bleConnected) sync else connect,
                 floatingActionButton = {
-                    FloatingActionButton(onClick = { qrCreateRequest++ }) {
+                    FloatingActionButton(onClick = { navController.navigate("${Routes.QrEdit}/new") }) {
                         Icon(Icons.Default.Add, contentDescription = "添加二维码")
                     }
                 },
@@ -534,17 +551,12 @@ private fun PassportApp(
                     qrs = qrs,
                     destinations = destinations,
                     refresh = refresh,
-                    createRequest = qrCreateRequest,
-                    onCreateRequestConsumed = { qrCreateRequest = 0 },
+                    edit = { qr -> navController.navigate("${Routes.QrEdit}/${qr.id}") },
                     present = { qr -> navController.navigate("${Routes.QrPresent}/${qr.id}") },
                 )
             }
         }
-        composable(
-            route = Tab.Me.route,
-            exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
-            popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
-        ) {
+        composable(route = Tab.Me.route) {
             PassportRootScaffold(
                 Tab.Me,
                 compact,
@@ -560,9 +572,8 @@ private fun PassportApp(
                             .onSuccess { refresh(); Toast.makeText(context, "已保存到手机；同步后会更新 Passport", Toast.LENGTH_SHORT).show() }
                             .onFailure { Toast.makeText(context, "个人资料保存失败", Toast.LENGTH_LONG).show() }
                     },
-                    onAvatarChange = { path ->
-                        db.setAvatarPath(path); refresh()
-                        Toast.makeText(context, "头像已保存到手机；同步后会更新 Passport", Toast.LENGTH_SHORT).show()
+                    onAvatarCropRequested = { token ->
+                        navController.navigate("${Routes.AvatarCrop}/$token")
                     },
                     onVolumeSave = { value -> db.setSoundVolume(value); refresh() },
                     onScreenTimeoutSave = { value ->
@@ -572,23 +583,15 @@ private fun PassportApp(
                 )
             }
         }
-        composable(
-            route = Routes.TrackMap,
-            enterTransition = { detailEnterTransition() },
-            exitTransition = { if (targetState.isSecondaryDestination()) parentExitTransition() else ExitTransition.None },
-            popEnterTransition = { if (initialState.isSecondaryDestination()) parentReturnTransition() else EnterTransition.None },
-            popExitTransition = { detailExitTransition() },
-        ) {
+        composable(route = Routes.TrackMap) {
             TrackMapScreen(
                 rows = tracks,
                 onBack = { navController.popBackStack() },
                 onEdit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
             )
         }
-        composable(
+        detailComposable(
             route = Routes.TrackCreate,
-            enterTransition = { detailEnterTransition() },
-            popExitTransition = { detailExitTransition() },
         ) {
             ManualTrackEditorScreen(
                 track = null,
@@ -600,11 +603,9 @@ private fun PassportApp(
                 },
             )
         }
-        composable(
+        detailComposable(
             route = "${Routes.TrackEdit}/{trackId}",
             arguments = listOf(navArgument("trackId") { type = NavType.LongType }),
-            enterTransition = { detailEnterTransition() },
-            popExitTransition = { detailExitTransition() },
         ) { entry ->
             val track = tracks.firstOrNull { it.id == entry.arguments?.getLong("trackId") }
             if (track == null) {
@@ -631,11 +632,7 @@ private fun PassportApp(
                 )
             }
         }
-        composable(
-            route = Routes.ChecklistImport,
-            enterTransition = { detailEnterTransition() },
-            popExitTransition = { detailExitTransition() },
-        ) {
+        composable(route = Routes.ChecklistImport) {
             SmartImportScreen(
                 initialSource = initialImportSource,
                 existingNames = destinations.map { it.name }.toSet(),
@@ -647,11 +644,61 @@ private fun PassportApp(
                 },
             )
         }
+        detailComposable(
+            route = "${Routes.QrEdit}/{qrId}",
+            arguments = listOf(navArgument("qrId") { type = NavType.StringType }),
+        ) { entry ->
+            val qrId = entry.arguments?.getString("qrId")
+            val qr = qrId?.takeUnless { it == "new" }?.let { id -> qrs.firstOrNull { it.id == id } }
+            if (qrId != "new" && qr == null) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            } else {
+                QrEditorScreen(
+                    qr = qr,
+                    starredCount = qrs.count { it.starred },
+                    destinations = destinations,
+                    boundDestinationId = qr?.id?.let { qrId ->
+                        destinations.firstOrNull { it.qrId == qrId }?.id
+                    },
+                    onBack = { navController.popBackStack() },
+                    onSave = { name, payload, starred, destinationId ->
+                        runCatching {
+                            val savedId = db.addQr(name, payload, starred, qr?.id)
+                            db.bindQrToDestination(savedId, destinationId)
+                        }.onSuccess {
+                            refresh()
+                            navController.popBackStack()
+                        }.onFailure {
+                            Toast.makeText(context, it.message ?: "保存失败", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                )
+            }
+        }
+        detailComposable(
+            route = "${Routes.AvatarCrop}/{sourceToken}",
+            arguments = listOf(navArgument("sourceToken") { type = NavType.StringType }),
+        ) { entry ->
+            val token = entry.arguments?.getString("sourceToken").orEmpty()
+            AvatarCropScreen(
+                sourceToken = token,
+                previousAvatarPath = profile.avatarPath,
+                onBack = {
+                    AvatarImage.discardStagedCropSource(context, token)
+                    navController.popBackStack()
+                },
+                onSaved = { path ->
+                    AvatarImage.discardStagedCropSource(context, token)
+                    db.setAvatarPath(path)
+                    refresh()
+                    Toast.makeText(context, "头像已保存到手机；同步后会更新 Passport", Toast.LENGTH_SHORT).show()
+                    navController.popBackStack()
+                },
+            )
+        }
         composable(
             route = "${Routes.QrPresent}/{qrId}",
             arguments = listOf(navArgument("qrId") { type = NavType.StringType }),
-            enterTransition = { detailEnterTransition() },
-            popExitTransition = { detailExitTransition() },
         ) { entry ->
             val qr = qrs.firstOrNull { it.id == entry.arguments?.getString("qrId") }
             if (qr == null) LaunchedEffect(Unit) { navController.popBackStack() }
@@ -813,7 +860,7 @@ private fun PassportRootScaffold(
                     Column(
                         Modifier.widthIn(max = PassportSpacing.listMaxWidth).fillMaxSize().align(Alignment.TopCenter)
                             .padding(horizontal = if (compact) PassportSpacing.md else PassportSpacing.lg)
-                            .padding(top = PassportSpacing.lg),
+                            .clipToBounds(),
                     ) {
                         content()
                     }
@@ -831,7 +878,7 @@ private fun ProfileSettingsPage(
     volume: Int,
     screenTimeout: Int,
     onSave: (PassportProfile) -> Unit,
-    onAvatarChange: (String?) -> Unit,
+    onAvatarCropRequested: (String) -> Unit,
     onVolumeSave: (Int) -> Unit,
     onScreenTimeoutSave: (Int) -> Unit,
 ) {
@@ -840,7 +887,6 @@ private fun ProfileSettingsPage(
     var socialIds by remember(profile) { mutableStateOf(profile.socialIds.joinToString("\n")) }
     var volumeDraft by remember(volume) { mutableFloatStateOf(volume.toFloat()) }
     var timeoutMenuOpen by remember { mutableStateOf(false) }
-    var cropSource by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var avatarBusy by remember { mutableStateOf(false) }
     var avatarError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -849,14 +895,15 @@ private fun ProfileSettingsPage(
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             avatarBusy = true; avatarError = null
-            runCatching { withContext(Dispatchers.IO) { AvatarImage.decode(context, uri) } }
-                .onSuccess { cropSource = it }
+            runCatching { withContext(Dispatchers.IO) { AvatarImage.stageCropSource(context, uri) } }
+                .onSuccess(onAvatarCropRequested)
                 .onFailure { avatarError = it.message ?: "无法读取头像" }
             avatarBusy = false
         }
     }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(top = PassportSpacing.lg, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("个人身份", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -889,8 +936,8 @@ private fun ProfileSettingsPage(
                 avatarError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 OutlinedTextField(nickname, { nickname = it }, label = { Text("机主昵称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(bio, { bio = it }, label = { Text("简介") }, minLines = 2, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(socialIds, { socialIds = it }, label = { Text("社交账号 ID") }, supportingText = { Text("每行一个，最多 4 个") }, minLines = 3, modifier = Modifier.fillMaxWidth())
-                Text("设备字库可能无法显示生僻字。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(socialIds, { socialIds = it }, label = { Text("社交账号 ID") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+                Text("设备字库可能无法显示生僻字", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = {
                     val accounts = socialIds.lineSequence().map(String::trim).filter(String::isNotEmpty).take(4).toList()
                     onSave(PassportProfile(nickname, bio, accounts, profile.avatarPath))
@@ -929,55 +976,84 @@ private fun ProfileSettingsPage(
             }
         }
     }
-    cropSource?.let { source ->
-        AvatarCropDialog(
-            source = source,
-            busy = avatarBusy,
-            onDismiss = { if (!avatarBusy) { source.recycle(); cropSource = null } },
-            onConfirm = { viewport, scale, offset ->
-                scope.launch {
-                    avatarBusy = true; avatarError = null
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            val cropped = AvatarImage.cropSquare(source, viewport, scale, offset)
-                            try { AvatarImage.save(context, cropped, profile.avatarPath) }
-                            finally { cropped.recycle() }
-                        }
-                    }.onSuccess { path ->
-                        source.recycle(); cropSource = null; onAvatarChange(path)
-                    }.onFailure { avatarError = it.message ?: "头像保存失败" }
-                    avatarBusy = false
-                }
-            },
-        )
-    }
 }
 
 @Composable
-private fun AvatarCropDialog(
-    source: android.graphics.Bitmap,
-    busy: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (IntSize, Float, Offset) -> Unit,
+private fun AvatarCropScreen(
+    sourceToken: String,
+    previousAvatarPath: String?,
+    onBack: () -> Unit,
+    onSaved: (String) -> Unit,
 ) {
-    var scale by remember(source) { mutableFloatStateOf(1f) }
-    var offset by remember(source) { mutableStateOf(Offset.Zero) }
-    var viewport by remember(source) { mutableStateOf(IntSize.Zero) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var source by remember(sourceToken) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var loading by remember(sourceToken) { mutableStateOf(true) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var scale by remember(sourceToken) { mutableFloatStateOf(1f) }
+    var offset by remember(sourceToken) { mutableStateOf(Offset.Zero) }
+    var viewport by remember(sourceToken) { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
-    val displaySize = remember(source, viewport) { AvatarImage.displaySize(source, viewport) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("裁切头像") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(
-                    Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp))
+    val displaySize = remember(source, viewport) {
+        source?.let { AvatarImage.displaySize(it, viewport) } ?: IntSize.Zero
+    }
+    LaunchedEffect(sourceToken) {
+        source = withContext(Dispatchers.IO) { AvatarImage.loadStagedCropSource(context, sourceToken) }
+        if (source == null) error = "无法读取待裁切头像"
+        loading = false
+    }
+    DisposableEffect(source) {
+        val bitmapOwnedByThisEffect = source
+        onDispose { bitmapOwnedByThisEffect?.takeUnless { it.isRecycled }?.recycle() }
+    }
+    BackHandler(enabled = !busy, onBack = onBack)
+    fun save() {
+        val bitmap = source ?: return
+        if (viewport.width <= 0 || busy) return
+        scope.launch {
+            busy = true
+            error = null
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val cropped = AvatarImage.cropSquare(bitmap, viewport, scale, offset)
+                    try { AvatarImage.save(context, cropped, previousAvatarPath) }
+                    finally { cropped.recycle() }
+                }
+            }.onSuccess(onSaved)
+                .onFailure { error = it.message ?: "头像保存失败" }
+            busy = false
+        }
+    }
+    PassportPageScaffold(
+        title = "裁切头像",
+        onBack = { if (!busy) onBack() },
+        primaryActionLabel = if (busy) "正在保存…" else "保存头像",
+        primaryActionEnabled = !loading && source != null && viewport.width > 0 && !busy,
+        onPrimaryAction = ::save,
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            when {
+                loading -> CircularProgressIndicator(Modifier.padding(PassportSpacing.lg))
+                source == null -> Text(
+                    error ?: "无法读取待裁切头像",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(PassportSpacing.lg),
+                )
+                else -> Column(
+                    Modifier.fillMaxWidth().widthIn(max = PassportSpacing.formMaxWidth)
+                        .verticalScroll(rememberScrollState())
+                        .padding(PassportSpacing.md),
+                    verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm),
+                ) {
+            Box(
+                    Modifier.fillMaxWidth().aspectRatio(1f).clip(MaterialTheme.shapes.medium)
                         .background(androidx.compose.ui.graphics.Color.Black)
                         .onSizeChanged {
                             viewport = it
-                            offset = AvatarImage.clampOffset(source, viewport, scale, offset)
+                            offset = AvatarImage.clampOffset(source!!, viewport, scale, offset)
                         }
-                        .pointerInput(source, viewport) {
+                        .pointerInput(sourceToken, viewport) {
                             detectTransformGestures { centroid, pan, zoom, _ ->
                                 val nextScale = (scale * zoom).coerceIn(1f, 8f)
                                 val nextOffset = AvatarImage.offsetAfterGesture(
@@ -989,13 +1065,13 @@ private fun AvatarCropDialog(
                                     pan = pan,
                                 )
                                 scale = nextScale
-                                offset = AvatarImage.clampOffset(source, viewport, nextScale, nextOffset)
+                                offset = AvatarImage.clampOffset(source!!, viewport, nextScale, nextOffset)
                             }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Image(
-                        source.asImageBitmap(), "头像裁切预览",
+                        source!!.asImageBitmap(), "头像裁切预览",
                         Modifier.requiredSize(
                             with(density) { displaySize.width.toDp() },
                             with(density) { displaySize.height.toDp() },
@@ -1006,15 +1082,59 @@ private fun AvatarCropDialog(
                         contentScale = ContentScale.FillBounds,
                     )
                 }
-                Text("拖动调整位置，双指缩放大小", style = MaterialTheme.typography.bodySmall)
+                    error?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(viewport, scale, offset) }, enabled = !busy && viewport.width > 0) {
-                Text(if (busy) "正在保存…" else "使用此裁切")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } },
+        }
+    }
+}
+
+@Composable
+private fun AlwaysStretchLazyColumn(
+    modifier: Modifier = Modifier,
+    state: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    content: LazyListScope.() -> Unit,
+) {
+    val overscroll = rememberOverscrollEffect()
+    val scrollableState = remember(state) {
+        androidx.compose.foundation.gestures.ScrollableState { delta -> state.dispatchRawDelta(delta) }
+    }
+    LazyColumn(
+        state = state,
+        modifier = modifier.scrollableArea(
+            state = scrollableState,
+            orientation = Orientation.Vertical,
+            overscrollEffect = overscroll,
+        ),
+        userScrollEnabled = false,
+        overscrollEffect = null,
+        verticalArrangement = verticalArrangement,
+        contentPadding = contentPadding,
+        content = content,
+    )
+}
+
+@Composable
+private fun AlwaysStretchColumn(
+    modifier: Modifier = Modifier,
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    val scrollableState = rememberScrollableState { 0f }
+    val overscroll = rememberOverscrollEffect()
+    Column(
+        modifier = modifier.scrollableArea(
+            state = scrollableState,
+            orientation = Orientation.Vertical,
+            overscrollEffect = overscroll,
+        ).padding(contentPadding),
+        verticalArrangement = verticalArrangement,
+        content = content,
     )
 }
 
@@ -1024,8 +1144,11 @@ private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
     val dayLabelFormat = remember { SimpleDateFormat("M月d日 EEEE", Locale.CHINA) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val groups = remember(rows) { rows.groupBy { dayFormat.format(Date(it.time)) } }
-    Column(Modifier.fillMaxSize()) {
-        if (rows.isEmpty()) {
+    if (rows.isEmpty()) {
+        AlwaysStretchColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = PassportSpacing.lg),
+        ) {
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = primaryPageCardColor(),
@@ -1039,9 +1162,10 @@ private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
                     Text("完成一次打卡后，这里会按日期整理你的到访地点。", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-        } else LazyColumn(
+        }
+    } else AlwaysStretchLazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 104.dp),
+            contentPadding = PaddingValues(top = PassportSpacing.lg, bottom = 104.dp),
         ) {
             groups.forEach { (_, dayRows) ->
                 item(key = "day-${dayRows.first().time}") {
@@ -1098,7 +1222,6 @@ private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
                     }
                 }
             }
-        }
     }
 }
 
@@ -1130,7 +1253,13 @@ private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refre
         }
         haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
-    Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm), modifier = Modifier.fillMaxSize()) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+        contentPadding = PaddingValues(top = PassportSpacing.lg, bottom = 104.dp),
+    ) {
+        item(key = "checklist-progress") {
         Card(colors = CardDefaults.cardColors(
             containerColor = primaryPageSummaryColor(),
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1151,13 +1280,12 @@ private fun ChecklistPage(db: PassportDb, destinations: List<Destination>, refre
                 )
             }
         }
+        }
         if (destinations.isEmpty()) {
-            Text("清单还是空的", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = PassportSpacing.md))
-        } else LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
-            contentPadding = PaddingValues(bottom = 104.dp),
-        ) {
+            item(key = "checklist-empty") {
+                Text("清单还是空的", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = PassportSpacing.md))
+            }
+        } else {
             fun androidx.compose.foundation.lazy.LazyListScope.destinationGroup(
                 title: String,
                 groupItems: List<Destination>,
@@ -1278,26 +1406,18 @@ private fun QrPage(
     qrs: List<PassportQr>,
     destinations: List<Destination>,
     refresh: () -> Unit,
-    createRequest: Int,
-    onCreateRequestConsumed: () -> Unit,
+    edit: (PassportQr) -> Unit,
     present: (PassportQr) -> Unit,
 ) {
-    var showEditor by remember { mutableStateOf(false) }
-    var current by remember { mutableStateOf<PassportQr?>(null) }
     var pendingDelete by remember { mutableStateOf<PassportQr?>(null) }
     val context = LocalContext.current
     val lastStarredIndex = qrs.indexOfLast { it.starred }
-    LaunchedEffect(createRequest) {
-        if (createRequest > 0) {
-            current = null
-            showEditor = true
-            onCreateRequestConsumed()
-        }
-    }
-    if (qrs.isEmpty()) Column(
+    if (qrs.isEmpty()) AlwaysStretchColumn(
         verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm),
         modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = PassportSpacing.lg),
     ) {
+        QrSyncHint()
         Card(colors = CardDefaults.cardColors(
             containerColor = primaryPageCardColor(),
             contentColor = MaterialTheme.colorScheme.onSurface,
@@ -1308,11 +1428,12 @@ private fun QrPage(
                 Text("可保存登机牌、会员码或活动凭证，内容只保存在手机本地。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    } else LazyColumn(
+    } else AlwaysStretchLazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
-        contentPadding = PaddingValues(bottom = 104.dp),
+        contentPadding = PaddingValues(top = PassportSpacing.lg, bottom = 104.dp),
     ) {
+            if (lastStarredIndex < 0) item(key = "qr-sync-hint") { QrSyncHint() }
             itemsIndexed(qrs, key = { _, qr -> qr.id }) { index, qr ->
                 val boundDestination = destinations.firstOrNull { it.qrId == qr.id }
                 val qrContentColor = if (qr.starred) MaterialTheme.colorScheme.onSecondaryContainer
@@ -1320,7 +1441,12 @@ private fun QrPage(
                 val qrSupportingColor = if (qr.starred) {
                     MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.78f)
                 } else MaterialTheme.colorScheme.onSurfaceVariant
-                Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                Column(
+                    modifier = Modifier.animateItem(
+                        placementSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+                ) {
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = if (qr.starred) primaryPageSelectedColor() else primaryPageCardColor(),
@@ -1359,7 +1485,7 @@ private fun QrPage(
                                     contentDescription = if (qr.starred) "取消星标 ${qr.name}" else "星标 ${qr.name}",
                                 )
                             }
-                            IconButton(onClick = { current = qr; showEditor = true }) {
+                            IconButton(onClick = { edit(qr) }) {
                                 Icon(Icons.Default.Edit, contentDescription = "编辑 ${qr.name}")
                             }
                             IconButton(onClick = { pendingDelete = qr }) {
@@ -1370,21 +1496,6 @@ private fun QrPage(
                     if (index == lastStarredIndex) QrSyncHint()
                 }
             }
-            if (lastStarredIndex < 0) item(key = "qr-sync-hint") { QrSyncHint() }
-    }
-    if (showEditor) QrEditorDialog(
-        current,
-        db.qrs().count { it.starred },
-        destinations,
-        destinations.firstOrNull { it.qrId == current?.id }?.id,
-        onDismiss = { showEditor = false },
-    ) { name, payload, starred, destinationId ->
-        runCatching {
-            val qrId = db.addQr(name, payload, starred, current?.id)
-            db.bindQrToDestination(qrId, destinationId)
-        }
-            .onSuccess { showEditor = false; refresh() }
-            .onFailure { Toast.makeText(context, it.message ?: "保存失败", Toast.LENGTH_LONG).show() }
     }
     pendingDelete?.let { qr ->
         ConfirmDeleteDialog(
@@ -1691,54 +1802,109 @@ private fun DestinationDialog(
     )
 }
 @Composable
-private fun QrEditorDialog(
+private fun QrEditorScreen(
     qr: PassportQr?,
     starredCount: Int,
     destinations: List<Destination>,
     boundDestinationId: String?,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
     onSave: (String, String, Boolean, String?) -> Unit,
 ) {
-    var name by remember(qr?.id) { mutableStateOf(qr?.name.orEmpty()) }
-    var payload by remember(qr?.id) { mutableStateOf(qr?.payload.orEmpty()) }
-    var starred by remember(qr?.id) { mutableStateOf(qr?.starred ?: false) }
-    var selectedDestinationId by remember(qr?.id, boundDestinationId) { mutableStateOf(boundDestinationId) }
-    var destinationMenuOpen by remember { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (qr == null) "添加二维码" else "编辑二维码") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)
-            OutlinedTextField(payload, { payload = it }, label = { Text("二维码原文") }, minLines = 3)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("星标同步", style = MaterialTheme.typography.titleSmall)
-                    Text("最多 3 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(
-                    checked = starred,
-                    enabled = starred || qr?.starred == true || starredCount < 3,
-                    onCheckedChange = { starred = it },
+    var name by rememberSaveable(qr?.id) { mutableStateOf(qr?.name.orEmpty()) }
+    var payload by rememberSaveable(qr?.id) { mutableStateOf(qr?.payload.orEmpty()) }
+    var starred by rememberSaveable(qr?.id) { mutableStateOf(qr?.starred ?: false) }
+    var selectedDestinationId by rememberSaveable(qr?.id, boundDestinationId) { mutableStateOf(boundDestinationId) }
+    var destinationMenuOpen by rememberSaveable { mutableStateOf(false) }
+    val canSave = name.trim().isNotEmpty() && payload.trim().let {
+        it.isNotEmpty() && it.toByteArray(Charsets.UTF_8).size <= 192
+    }
+    PassportPageScaffold(
+        title = if (qr == null) "添加二维码" else "编辑二维码",
+        onBack = onBack,
+        primaryActionLabel = if (qr == null) "添加二维码" else "保存更改",
+        primaryActionEnabled = canSave,
+        onPrimaryAction = { onSave(name, payload, starred, selectedDestinationId) },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                Modifier.fillMaxWidth().widthIn(max = PassportSpacing.formMaxWidth)
+                    .align(Alignment.TopCenter)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = PassportSpacing.md, vertical = PassportSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
+            ) {
+                OutlinedTextField(
+                    name,
+                    { name = it },
+                    label = { Text("名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            }
-            Text("绑定打卡项目", style = MaterialTheme.typography.titleSmall)
-            Box {
-                OutlinedButton(onClick = { destinationMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(destinations.firstOrNull { it.id == selectedDestinationId }?.name ?: "不绑定")
-                }
-                DropdownMenu(expanded = destinationMenuOpen, onDismissRequest = { destinationMenuOpen = false }) {
-                    DropdownMenuItem(text = { Text("不绑定") }, onClick = {
-                        selectedDestinationId = null; destinationMenuOpen = false
-                    })
-                    destinations.forEach { destination ->
-                        DropdownMenuItem(text = { Text(destination.name) }, onClick = {
-                            selectedDestinationId = destination.id; destinationMenuOpen = false
-                        })
+                OutlinedTextField(
+                    payload,
+                    { payload = it },
+                    label = { Text("二维码原文") },
+                    minLines = 5,
+                    supportingText = { Text("UTF-8 最多 192 字节") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(PassportSpacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("星标同步", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "最多 3 个",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = starred,
+                            enabled = starred || qr?.starred == true || starredCount < 3,
+                            onCheckedChange = { starred = it },
+                        )
                     }
                 }
+                Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                    Text("绑定打卡项目", style = MaterialTheme.typography.titleSmall)
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { destinationMenuOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(destinations.firstOrNull { it.id == selectedDestinationId }?.name ?: "不绑定")
+                        }
+                        DropdownMenu(
+                            expanded = destinationMenuOpen,
+                            onDismissRequest = { destinationMenuOpen = false },
+                        ) {
+                            DropdownMenuItem(text = { Text("不绑定") }, onClick = {
+                                selectedDestinationId = null
+                                destinationMenuOpen = false
+                            })
+                            destinations.forEach { destination ->
+                                DropdownMenuItem(text = { Text(destination.name) }, onClick = {
+                                    selectedDestinationId = destination.id
+                                    destinationMenuOpen = false
+                                })
+                            }
+                        }
+                    }
+                }
+                Text(
+                    "保存后可直接在手机内全屏出示。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text("原文按 UTF-8 最多 192 字节；保存后可直接在手机内全屏出示。", style = MaterialTheme.typography.bodySmall)
-        } },
-        confirmButton = { TextButton(onClick = { onSave(name, payload, starred, selectedDestinationId) }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

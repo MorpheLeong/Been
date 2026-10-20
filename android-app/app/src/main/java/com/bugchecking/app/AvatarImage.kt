@@ -12,6 +12,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -19,6 +20,7 @@ internal object AvatarImage {
     const val DEVICE_SIZE = 46
     const val DEVICE_BYTES = DEVICE_SIZE * DEVICE_SIZE * 2
     private const val MAX_SOURCE_SIDE = 4096
+    private val stagedTokenPattern = Regex("avatar_crop_[0-9a-f-]+\\.png")
 
     fun decode(context: Context, uri: Uri): Bitmap {
         return if (Build.VERSION.SDK_INT >= 28) {
@@ -98,6 +100,41 @@ internal object AvatarImage {
         }
         previousPath?.let(::File)?.takeIf { it.absolutePath != destination.absolutePath }?.delete()
         return destination.absolutePath
+    }
+
+    fun stageCropSource(context: Context, uri: Uri): String {
+        val directory = stagedSourceDirectory(context)
+        directory.listFiles()?.forEach(File::delete)
+        val token = "avatar_crop_${UUID.randomUUID()}.png"
+        val destination = File(directory, token)
+        val bitmap = decode(context, uri)
+        try {
+            FileOutputStream(destination).use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "头像暂存失败" }
+            }
+        } finally {
+            bitmap.recycle()
+        }
+        return token
+    }
+
+    fun loadStagedCropSource(context: Context, token: String): Bitmap? =
+        stagedSourceFile(context, token)?.let { BitmapFactory.decodeFile(it.absolutePath) }
+
+    fun discardStagedCropSource(context: Context, token: String) {
+        stagedSourceFile(context, token)?.delete()
+    }
+
+    private fun stagedSourceDirectory(context: Context): File =
+        File(context.cacheDir, "avatar-crop").apply { mkdirs() }
+
+    private fun stagedSourceFile(context: Context, token: String): File? {
+        if (!stagedTokenPattern.matches(token)) return null
+        return runCatching {
+            val directory = stagedSourceDirectory(context)
+            val file = File(directory, token)
+            file.takeIf { it.parentFile?.canonicalPath == directory.canonicalPath && it.isFile }
+        }.getOrNull()
     }
 
     fun load(path: String?): Bitmap? = path?.takeIf(String::isNotBlank)?.let { BitmapFactory.decodeFile(it) }

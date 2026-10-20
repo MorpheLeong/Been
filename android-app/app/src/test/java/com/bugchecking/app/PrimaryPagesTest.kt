@@ -53,6 +53,26 @@ class PrimaryPagesTest {
         assertEquals(payload, decoded.text)
     }
 
+    @Test fun qrDisplayOrderPinsStarsAndRestoresCreationOrder() {
+        val original = listOf(
+            PassportQr("a", "第一张", "a", starred = false, createdOrder = 1),
+            PassportQr("b", "第二张", "b", starred = true, createdOrder = 2, starredOrder = 2),
+            PassportQr("c", "第三张", "c", starred = true, createdOrder = 3, starredOrder = 1),
+            PassportQr("d", "第四张", "d", starred = false, createdOrder = 4),
+        )
+        assertEquals(listOf("c", "b", "a", "d"), orderQrsForDisplay(original).map { it.id })
+
+        val newlyStarred = original.map {
+            if (it.id == "a") it.copy(starred = true, starredOrder = 3) else it
+        }
+        assertEquals(listOf("c", "b", "a", "d"), orderQrsForDisplay(newlyStarred).map { it.id })
+
+        val unstarredAgain = newlyStarred.map {
+            if (it.id == "a") it.copy(starred = false, starredOrder = null) else it
+        }
+        assertEquals(listOf("c", "b", "a", "d"), orderQrsForDisplay(unstarredAgain).map { it.id })
+    }
+
     @Test fun checklistProgressIsAlwaysBounded() {
         assertEquals(0f, checklistProgress(0, 0))
         assertEquals(0.5f, checklistProgress(2, 4))
