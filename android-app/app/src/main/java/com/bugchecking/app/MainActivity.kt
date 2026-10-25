@@ -11,17 +11,12 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.bluetooth.BluetoothManager
-import android.location.Criteria
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.provider.Settings
 import android.provider.OpenableColumns
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.CancellationSignal
-import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -216,7 +211,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -343,6 +337,8 @@ private enum class Tab(val route: String, val title: String, val label: String, 
 
 private object Routes {
     const val TrackMap = "track-map"
+    const val TrackFavorites = "track-favorites"
+    const val TrackFavoriteEdit = "track-favorite-edit"
     const val TrackCreate = "track-create"
     const val TrackEdit = "track-edit"
     const val ChecklistImport = "checklist-import"
@@ -356,8 +352,9 @@ private val DetailExitEasing = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 
 private fun NavBackStackEntry.isSecondaryDestination(): Boolean {
     val route = destination.route.orEmpty()
-    return route == Routes.TrackMap || route == Routes.TrackCreate || route == Routes.ChecklistImport ||
-        route.startsWith(Routes.TrackEdit) || route.startsWith(Routes.QrEdit) ||
+    return route == Routes.TrackMap || route == Routes.TrackFavorites || route == Routes.TrackCreate ||
+        route == Routes.ChecklistImport || route.startsWith(Routes.TrackEdit) ||
+        route.startsWith(Routes.TrackFavoriteEdit) || route.startsWith(Routes.QrEdit) ||
         route.startsWith(Routes.QrPresent) || route.startsWith(Routes.AvatarCrop)
 }
 
@@ -420,6 +417,7 @@ private fun PassportApp(
     val destinations = remember(revision, externalRevision) { db.destinations() }
     val qrs = remember(revision, externalRevision) { db.qrs() }
     val tracks = remember(revision, externalRevision) { db.tracks() }
+    val favoriteTracks = remember(revision, externalRevision) { db.favoriteTracks() }
     val profile = remember(revision, externalRevision) { db.profile() }
     val volume = remember(revision, externalRevision) { db.soundVolume() }
     val screenTimeout = remember(revision, externalRevision) { db.screenTimeoutSeconds() }
@@ -498,6 +496,12 @@ private fun PassportApp(
                 floatingActionButton = {
                     Column(horizontalAlignment = Alignment.End) {
                         FloatingActionButton(
+                            onClick = { navController.navigate(Routes.TrackFavorites) },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) { Icon(Icons.Default.Star, contentDescription = "打开收藏轨迹") }
+                        Spacer(Modifier.height(PassportSpacing.sm))
+                        FloatingActionButton(
                             onClick = { navController.navigate(Routes.TrackMap) },
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -512,6 +516,12 @@ private fun PassportApp(
                 TracksPage(
                     tracks,
                     edit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
+                    favorite = { track, tier ->
+                        runCatching { db.setTrackFavoriteTier(track.id, tier) }
+                            .onSuccess { if (it) refresh() }
+                            .onFailure { Toast.makeText(context, "收藏更新失败", Toast.LENGTH_SHORT).show() }
+                            .getOrDefault(false)
+                    },
                 )
             }
         }
@@ -590,6 +600,54 @@ private fun PassportApp(
                 onEdit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
             )
         }
+        detailComposable(route = Routes.TrackFavorites) {
+            TrackFavoritesScreen(
+                tracks = favoriteTracks,
+                onBack = { navController.popBackStack() },
+                onEdit = { navController.navigate("${Routes.TrackFavoriteEdit}/${it.id}") },
+            )
+        }
+        detailComposable(
+            route = "${Routes.TrackFavoriteEdit}/{trackId}",
+            arguments = listOf(navArgument("trackId") { type = NavType.LongType }),
+        ) { entry ->
+            val trackId = entry.arguments?.getLong("trackId") ?: -1L
+            val track = favoriteTracks.firstOrNull { it.id == trackId } ?: db.track(trackId)
+            if (track == null) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            } else {
+                val updateFavorite: (Int) -> Unit = { tier ->
+                    runCatching { db.setTrackFavoriteTier(track.id, tier) }
+                        .onSuccess { updated ->
+                            if (updated) refresh()
+                            else {
+                                Toast.makeText(context, "轨迹已不存在", Toast.LENGTH_SHORT).show()
+                                navController.popBackStack()
+                            }
+                        }
+                        .onFailure { Toast.makeText(context, "收藏更新失败", Toast.LENGTH_LONG).show() }
+                }
+                if (track.entrySource == TrackEntrySource.MANUAL) {
+                    ManualTrackEditorScreen(
+                        track = track,
+                        favoriteOnly = true,
+                        onBack = { navController.popBackStack() },
+                        onFavorite = updateFavorite,
+                        onSave = {},
+                    )
+                } else {
+                    TrackEditorScreen(
+                        track = track,
+                        favoriteOnly = true,
+                        onBack = { navController.popBackStack() },
+                        onDelete = {},
+                        onFavorite = updateFavorite,
+                        onSave = {},
+                        onApplyPlace = {},
+                    )
+                }
+            }
+        }
         detailComposable(
             route = Routes.TrackCreate,
         ) {
@@ -615,6 +673,7 @@ private fun PassportApp(
                     track = track,
                     onBack = { navController.popBackStack() },
                     onDelete = { db.deleteTrack(track.id); refresh(); navController.popBackStack() },
+                    onFavorite = { tier -> db.setTrackFavoriteTier(track.id, tier); refresh() },
                     onSave = { draft ->
                         db.updateManualTrack(track.id, draft)
                         refresh()
@@ -627,6 +686,7 @@ private fun PassportApp(
                     initialLink = initialMapLink,
                     onBack = { initialMapLink = null; navController.popBackStack() },
                     onDelete = { db.deleteTrack(track.id); refresh(); initialMapLink = null; navController.popBackStack() },
+                    onFavorite = { tier -> db.setTrackFavoriteTier(track.id, tier); refresh() },
                     onSave = { name -> db.updateTrackName(track.id, name); refresh(); initialMapLink = null; navController.popBackStack() },
                     onApplyPlace = { place -> db.updateTrackPlace(track.id, place); refresh(); initialMapLink = null; navController.popBackStack() },
                 )
@@ -1139,7 +1199,11 @@ private fun AlwaysStretchColumn(
 }
 
 @Composable
-private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
+private fun TracksPage(
+    rows: List<TrackPoint>,
+    edit: (TrackPoint) -> Unit,
+    favorite: (TrackPoint, Int) -> Boolean,
+) {
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val dayLabelFormat = remember { SimpleDateFormat("M月d日 EEEE", Locale.CHINA) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -1200,22 +1264,27 @@ private fun TracksPage(rows: List<TrackPoint>, edit: (TrackPoint) -> Unit) {
                                 color = MaterialTheme.colorScheme.primary,
                             ) {}
                         }
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = primaryPageCardColor(),
-                                contentColor = MaterialTheme.colorScheme.onSurface,
-                            ),
-                            modifier = Modifier.weight(1f).padding(vertical = PassportSpacing.xxs).clickable { edit(row) },
-                        ) {
+                        FavoriteTrackCard(
+                            track = row,
+                            onClick = { edit(row) },
+                            onFavorite = { tier -> favorite(row, tier) },
+                            modifier = Modifier.weight(1f).padding(vertical = PassportSpacing.xxs),
+                        ) { contentColor, _ ->
                             Column(
                                 Modifier.fillMaxWidth().padding(PassportSpacing.md),
                                 verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs),
                             ) {
-                                Text(row.name, style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                        "${timeFormat.format(Date(row.time))} · ${trackAccuracyLabel(row)}",
+                                    row.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = contentColor,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Text(
+                                    "${timeFormat.format(Date(row.time))} · ${trackAccuracyLabel(row)}",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = contentColor.copy(alpha = 0.78f),
+                                    modifier = Modifier.padding(end = 56.dp),
                                 )
                             }
                         }
@@ -1990,6 +2059,7 @@ private fun TrackNearbyPlacesSection(
     expanded: Boolean,
     emptyMessage: String?,
     idleActionLabel: String,
+    editingEnabled: Boolean = true,
     onToggle: () -> Unit,
     onSelect: (NearbyPlaceCandidate) -> Unit,
 ) {
@@ -2009,7 +2079,7 @@ private fun TrackNearbyPlacesSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (!loading) TextButton(onClick = onToggle) {
+        if (!loading) TextButton(onClick = onToggle, enabled = editingEnabled) {
             Text(if (places.isNotEmpty()) if (expanded) "收起" else "展开" else idleActionLabel)
         }
     }
@@ -2031,6 +2101,7 @@ private fun TrackNearbyPlacesSection(
                         else MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier.fillMaxWidth().selectable(
                         selected = selected,
+                        enabled = editingEnabled,
                         role = Role.RadioButton,
                         onClick = { onSelect(candidate) },
                     ),
@@ -2039,7 +2110,7 @@ private fun TrackNearbyPlacesSection(
                         Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = PassportSpacing.xs),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = selected, onClick = null)
+                        RadioButton(selected = selected, onClick = null, enabled = editingEnabled)
                         Text(candidate.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                         Text(
                             formatNearbyDistance(candidate.distanceMeters),
@@ -2085,6 +2156,7 @@ private fun TrackMapToolsSection(
     linkExpanded: Boolean,
     linkText: String,
     parsingLink: Boolean,
+    editingEnabled: Boolean = true,
     onOpenMap: () -> Unit,
     onToggleLink: () -> Unit,
     onLinkTextChange: (String) -> Unit,
@@ -2102,6 +2174,7 @@ private fun TrackMapToolsSection(
             TrackToolRow(
                 Icons.Default.Link,
                 if (linkExpanded) "收起地图分享识别" else "从地图分享内容识别",
+                enabled = editingEnabled,
                 onClick = onToggleLink,
             )
         }
@@ -2111,13 +2184,14 @@ private fun TrackMapToolsSection(
             OutlinedTextField(
                 value = linkText,
                 onValueChange = onLinkTextChange,
+                readOnly = !editingEnabled,
                 label = { Text("粘贴高德或 Google Maps 分享内容") },
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
             )
             FilledTonalButton(
                 onClick = onParseLink,
-                enabled = linkText.isNotBlank() && !parsingLink,
+                enabled = editingEnabled && linkText.isNotBlank() && !parsingLink,
                 modifier = Modifier.align(Alignment.End),
             ) { Text(if (parsingLink) "解析中…" else "识别名称") }
         }
@@ -2129,12 +2203,15 @@ private fun TrackMapToolsSection(
 private fun TrackEditorPage(
     title: String,
     subtitle: String,
-    primaryActionLabel: String,
+    primaryActionLabel: String?,
     name: String,
     onNameChange: (String) -> Unit,
     onBack: () -> Unit,
-    onSave: () -> Unit,
+    onSave: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    favoriteTier: Int = 0,
+    onFavorite: ((Int) -> Unit)? = null,
+    editingEnabled: Boolean = true,
     recordInfo: @Composable () -> Unit,
     nearbyPlaces: List<NearbyPlaceCandidate>,
     nearbyLoading: Boolean,
@@ -2156,20 +2233,26 @@ private fun TrackEditorPage(
 ) {
     var moreMenuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var favoriteDialogOpen by remember { mutableStateOf(false) }
     BackHandler(onBack = onBack)
     PassportPageScaffold(
         title = title,
         subtitle = subtitle,
         onBack = onBack,
         actions = {
-            if (onDelete != null) Box {
+            if (onDelete != null || onFavorite != null) Box {
                 IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Default.MoreVert, "更多操作") }
                 DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("删除这条轨迹", color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                        onClick = { moreMenuOpen = false; confirmDelete = true },
+                    if (onFavorite != null) DropdownMenuItem(
+                        text = { Text("收藏这条轨迹") },
+                        leadingIcon = { Icon(Icons.Default.Star, null) },
+                        onClick = { moreMenuOpen = false; favoriteDialogOpen = true },
                     )
+                    if (onDelete != null) DropdownMenuItem(
+                            text = { Text("删除这条轨迹", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = { moreMenuOpen = false; confirmDelete = true },
+                        )
                 }
             }
         },
@@ -2185,11 +2268,11 @@ private fun TrackEditorPage(
                 OutlinedTextField(
                     value = name,
                     onValueChange = onNameChange,
+                    readOnly = !editingEnabled,
                     label = { Text("地点名称") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                recordInfo()
                 TrackNearbyPlacesSection(
                     name = name,
                     places = nearbyPlaces,
@@ -2197,6 +2280,7 @@ private fun TrackEditorPage(
                     expanded = nearbyExpanded,
                     emptyMessage = nearbyEmptyMessage,
                     idleActionLabel = nearbyIdleActionLabel,
+                    editingEnabled = editingEnabled,
                     onToggle = onToggleNearby,
                     onSelect = onSelectNearby,
                 )
@@ -2205,11 +2289,13 @@ private fun TrackEditorPage(
                     linkExpanded = linkExpanded,
                     linkText = linkText,
                     parsingLink = parsingLink,
+                    editingEnabled = editingEnabled,
                     onOpenMap = onOpenMap,
                     onToggleLink = onToggleLink,
                     onLinkTextChange = onLinkTextChange,
                     onParseLink = onParseLink,
                 )
+                recordInfo()
                 if (feedback.isNotBlank()) Text(
                     feedback,
                     style = MaterialTheme.typography.bodySmall,
@@ -2225,6 +2311,14 @@ private fun TrackEditorPage(
         onConfirm = onDelete,
         onDismiss = { confirmDelete = false },
     )
+    if (favoriteDialogOpen && onFavorite != null) FavoriteTierDialog(
+        currentTier = favoriteTier,
+        onDismiss = { favoriteDialogOpen = false },
+        onSave = { tier ->
+            favoriteDialogOpen = false
+            onFavorite(tier)
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2234,6 +2328,8 @@ private fun ManualTrackEditorScreen(
     onBack: () -> Unit,
     onSave: (ManualTrackDraft) -> Unit,
     onDelete: (() -> Unit)? = null,
+    onFavorite: ((Int) -> Unit)? = null,
+    favoriteOnly: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2335,13 +2431,13 @@ private fun ManualTrackEditorScreen(
     }
 
     LaunchedEffect(track?.id) {
-        if (track == null && !initialLocationRequested) {
+        if (!favoriteOnly && track == null && !initialLocationRequested) {
             initialLocationRequested = true
             requestLocationPermissionOrLocate()
         }
     }
     LaunchedEffect(locateRequest) {
-        if (locateRequest == 0) return@LaunchedEffect
+        if (favoriteOnly || locateRequest == 0) return@LaunchedEffect
         locating = true
         locationMessage = "正在获取当前位置…"
         val location = findCurrentLocation(context)
@@ -2357,18 +2453,18 @@ private fun ManualTrackEditorScreen(
         }
     }
 
-    fun parseLink() {
-        if (linkText.isBlank() || parsingLink) return
+    fun parseLink(content: String = linkText) {
+        if (content.isBlank() || parsingLink) return
         parsingLink = true
         message = ""
         scope.launch {
-            runCatching { resolveSharedPlace(linkText) }
+            runCatching { resolveSharedPlace(content) }
                 .onSuccess { place ->
                     name = place.name.orEmpty()
                     provider = place.provider
                     address = place.address
                     placeId = place.placeId
-                    originalUrl = place.originalUrl ?: linkText
+                    originalUrl = place.originalUrl ?: content
                     canonicalUrl = place.canonicalUrl
                     resolutionState = place.state
                     linkToolsExpanded = false
@@ -2418,8 +2514,8 @@ private fun ManualTrackEditorScreen(
     }
     TrackEditorPage(
         title = mode.title(),
-        subtitle = subtitle,
-        primaryActionLabel = mode.primaryActionLabel(),
+        subtitle = if (favoriteOnly) "$subtitle · 仅可修改收藏列表" else subtitle,
+        primaryActionLabel = mode.primaryActionLabel().takeUnless { favoriteOnly },
         name = name,
         onNameChange = {
             name = it
@@ -2427,18 +2523,27 @@ private fun ManualTrackEditorScreen(
             resolutionState = PlaceResolutionState.MANUAL_CONFIRMATION
         },
         onBack = onBack,
-        onSave = ::save,
-        onDelete = onDelete.takeIf { capabilities.canDelete },
+        onSave = if (favoriteOnly) null else ::save,
+        onDelete = onDelete.takeIf { capabilities.canDelete && !favoriteOnly },
+        favoriteTier = track?.favoriteTier ?: 0,
+        onFavorite = onFavorite.takeIf { track != null },
+        editingEnabled = !favoriteOnly,
         recordInfo = {
             Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
             Text("记录信息", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             TrackFieldPair(
-                first = { modifier -> PickerField("日期", dateFormat.format(Date(timestamp)), { showDatePicker = true }, modifier) },
-                second = { modifier -> PickerField("时间", timeFormat.format(Date(timestamp)), { showTimePicker = true }, modifier) },
+                first = { modifier ->
+                    if (favoriteOnly) ReadOnlyTrackField("日期", dateFormat.format(Date(timestamp)), modifier)
+                    else PickerField("日期", dateFormat.format(Date(timestamp)), { showDatePicker = true }, modifier)
+                },
+                second = { modifier ->
+                    if (favoriteOnly) ReadOnlyTrackField("时间", timeFormat.format(Date(timestamp)), modifier)
+                    else PickerField("时间", timeFormat.format(Date(timestamp)), { showTimePicker = true }, modifier)
+                },
             )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("坐标", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                FilledTonalButton(onClick = ::requestLocationPermissionOrLocate, enabled = !locating) {
+                if (!favoriteOnly) FilledTonalButton(onClick = ::requestLocationPermissionOrLocate, enabled = !locating) {
                     Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(PassportSpacing.xxs))
                     Text(if (locating) "定位中…" else "重新定位")
@@ -2449,6 +2554,7 @@ private fun ManualTrackEditorScreen(
                     OutlinedTextField(
                         value = latitude,
                         onValueChange = { latitude = it; accuracy = 0f },
+                        readOnly = favoriteOnly,
                         label = { Text("纬度") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
@@ -2459,6 +2565,7 @@ private fun ManualTrackEditorScreen(
                     OutlinedTextField(
                         value = longitude,
                         onValueChange = { longitude = it; accuracy = 0f },
+                        readOnly = favoriteOnly,
                         label = { Text("经度") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
@@ -2477,7 +2584,7 @@ private fun ManualTrackEditorScreen(
         nearbyLoading = nearbyLoading,
         nearbyExpanded = nearbyExpanded,
         nearbyEmptyMessage = nearbyMessage,
-        nearbyIdleActionLabel = "查找",
+        nearbyIdleActionLabel = if (favoriteOnly) "不可修改" else "查找",
         onToggleNearby = { if (nearbyPlaces.isEmpty()) findNearby() else nearbyExpanded = !nearbyExpanded },
         onSelectNearby = { candidate ->
             name = candidate.name
@@ -2492,12 +2599,20 @@ private fun ManualTrackEditorScreen(
         parsingLink = parsingLink,
         onToggleLink = { linkToolsExpanded = !linkToolsExpanded },
         onLinkTextChange = { linkText = it },
-        onParseLink = ::parseLink,
+        onParseLink = { parseLink() },
         feedback = message,
         feedbackIsError = messageIsError,
     )
 
-    if (showDatePicker) {
+    if (track != null && !favoriteOnly) ClipboardMapLinkPrompt(
+        promptKey = "manual-track-${track.id}",
+        onRecognize = { content ->
+            linkText = content
+            parseLink(content)
+        },
+    )
+
+    if (showDatePicker && !favoriteOnly) {
         DateWheelPickerDialog(
             timestamp = timestamp,
             onDismiss = { showDatePicker = false },
@@ -2507,7 +2622,7 @@ private fun ManualTrackEditorScreen(
             },
         )
     }
-    if (showTimePicker) {
+    if (showTimePicker && !favoriteOnly) {
         TimeWheelPickerDialog(
             timestamp = timestamp,
             onDismiss = { showTimePicker = false },
@@ -2740,47 +2855,23 @@ private fun hasLocationPermission(context: Context): Boolean =
 @Suppress("MissingPermission")
 private suspend fun findCurrentLocation(context: Context): Location? {
     if (!hasLocationPermission(context)) return null
-    val manager = context.getSystemService(LocationManager::class.java)
-    val providers = manager.getProviders(true)
-    if (providers.isEmpty()) return null
-    val preferred = manager.getBestProvider(Criteria().apply { accuracy = Criteria.ACCURACY_FINE }, true)
-        ?: providers.firstOrNull { it == LocationManager.NETWORK_PROVIDER }
-        ?: providers.first()
-    val fallback = providers.mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
-        .maxByOrNull { it.time }
-    val current = withTimeoutOrNull(15_000L) {
-        suspendCancellableCoroutine { continuation ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val signal = CancellationSignal()
-                continuation.invokeOnCancellation { signal.cancel() }
-                manager.getCurrentLocation(preferred, signal, ContextCompat.getMainExecutor(context)) { location ->
-                    if (continuation.isActive) continuation.resume(location)
-                }
-            } else {
-                val listener = object : LocationListener {
-                    override fun onLocationChanged(location: Location) {
-                        manager.removeUpdates(this)
-                        if (continuation.isActive) continuation.resume(location)
-                    }
-                    override fun onProviderEnabled(provider: String) = Unit
-                    override fun onProviderDisabled(provider: String) = Unit
-                    @Deprecated("Deprecated in Android")
-                    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
-                }
-                continuation.invokeOnCancellation { manager.removeUpdates(listener) }
-                manager.requestSingleUpdate(preferred, listener, Looper.getMainLooper())
-            }
+    return suspendCancellableCoroutine { continuation ->
+        var handle: LocationRequestHandle? = null
+        handle = BestEffortLocation.request(context) { location ->
+            if (continuation.isActive) continuation.resume(location)
         }
+        continuation.invokeOnCancellation { handle?.cancel() }
     }
-    return current ?: fallback
 }
 
 @Composable
 private fun TrackEditorScreen(
     track: TrackPoint,
     initialLink: String? = null,
+    favoriteOnly: Boolean = false,
     onBack: () -> Unit,
     onDelete: () -> Unit,
+    onFavorite: (Int) -> Unit,
     onSave: (String) -> Unit,
     onApplyPlace: (PlaceResolution) -> Unit,
 ) {
@@ -2846,12 +2937,12 @@ private fun TrackEditorScreen(
         stagedResolutionState = null
     }
 
-    fun parseLink() {
-        if (linkText.isBlank() || parsingLink) return
+    fun parseLink(content: String = linkText) {
+        if (content.isBlank() || parsingLink) return
         parsingLink = true
         message = ""
         scope.launch {
-            val result = runCatching { resolveSharedPlace(linkText) }
+            val result = runCatching { resolveSharedPlace(content) }
             parsingLink = false
             result.onSuccess { place ->
                 stagePlace(place)
@@ -2878,6 +2969,10 @@ private fun TrackEditorScreen(
     }
 
     LaunchedEffect(track.id, nearbyReload) {
+        if (favoriteOnly) {
+            nearbyLoading = false
+            return@LaunchedEffect
+        }
         nearbyLoading = true
         nearbyError = null
         if (!Geocoder.isPresent()) {
@@ -2895,7 +2990,7 @@ private fun TrackEditorScreen(
     }
 
     LaunchedEffect(track.id, initialLink) {
-        if (!initialLink.isNullOrBlank()) parseLink()
+        if (!favoriteOnly && !initialLink.isNullOrBlank()) parseLink(initialLink)
     }
 
     val mode = TrackEditorMode.EDIT_CHECK_IN
@@ -2907,8 +3002,9 @@ private fun TrackEditorScreen(
     }
     TrackEditorPage(
         title = mode.title(),
-        subtitle = "设备打卡 · $headerDateTime · ${trackAccuracyLabel(track)}",
-        primaryActionLabel = mode.primaryActionLabel(),
+        subtitle = "设备打卡 · $headerDateTime · ${trackAccuracyLabel(track)}" +
+            if (favoriteOnly) " · 仅可修改收藏列表" else "",
+        primaryActionLabel = mode.primaryActionLabel().takeUnless { favoriteOnly },
         name = name,
         onNameChange = {
             name = it
@@ -2916,8 +3012,11 @@ private fun TrackEditorScreen(
             message = ""
         },
         onBack = onBack,
-        onSave = ::save,
-        onDelete = onDelete.takeIf { capabilities.canDelete },
+        onSave = if (favoriteOnly) null else ::save,
+        onDelete = onDelete.takeIf { capabilities.canDelete && !favoriteOnly },
+        favoriteTier = track.favoriteTier,
+        onFavorite = onFavorite,
+        editingEnabled = !favoriteOnly,
         recordInfo = {
             Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2948,7 +3047,7 @@ private fun TrackEditorScreen(
         nearbyLoading = nearbyLoading,
         nearbyExpanded = nearbyExpanded,
         nearbyEmptyMessage = nearbyError,
-        nearbyIdleActionLabel = "重试",
+        nearbyIdleActionLabel = if (favoriteOnly) "不可修改" else "重试",
         onToggleNearby = { if (nearbyPlaces.isEmpty()) nearbyReload++ else nearbyExpanded = !nearbyExpanded },
         onSelectNearby = { candidate ->
             name = candidate.name
@@ -2971,9 +3070,17 @@ private fun TrackEditorScreen(
         parsingLink = parsingLink,
         onToggleLink = { linkToolsExpanded = !linkToolsExpanded },
         onLinkTextChange = { linkText = it; message = "" },
-        onParseLink = ::parseLink,
+        onParseLink = { parseLink() },
         feedback = message,
         feedbackIsError = messageIsError,
+    )
+    if (!favoriteOnly) ClipboardMapLinkPrompt(
+        promptKey = "check-in-track-${track.id}",
+        ignoredText = initialLink,
+        onRecognize = { content ->
+            linkText = content
+            parseLink(content)
+        },
     )
     if (mapPickerOpen) MapProviderPickerSheet(
         onDismiss = { mapPickerOpen = false },
@@ -2988,44 +3095,51 @@ private fun TrackEditorScreen(
     )
 }
 
-private fun Address.toRawNearbyPlace(): RawNearbyPlace? {
-    val label = listOf(featureName, premises, subLocality, locality, thoroughfare)
-        .mapNotNull { it?.replace(Regex("\\s+"), " ")?.trim() }
-        .firstOrNull { value -> value.isNotBlank() && value.length <= 100 && value.any(Char::isLetter) }
-        ?: return null
-    return RawNearbyPlace(
-        name = label,
-        address = getAddressLine(0),
-        latitude = if (hasLatitude()) latitude else null,
-        longitude = if (hasLongitude()) longitude else null,
-    )
-}
-
 @Suppress("DEPRECATION")
 private suspend fun loadNearbyPlaces(context: Context, track: TrackPoint): List<NearbyPlaceCandidate> {
     val geocoder = Geocoder(context)
-    val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        suspendCancellableCoroutine { continuation ->
-            try {
-                geocoder.getFromLocation(track.lat, track.lon, 10, object : Geocoder.GeocodeListener {
-                    override fun onGeocode(addresses: MutableList<Address>) {
-                        if (continuation.isActive) continuation.resume(addresses)
-                    }
+    return try {
+        val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            suspendCancellableCoroutine { continuation ->
+                try {
+                    geocoder.getFromLocation(track.lat, track.lon, 10, object : Geocoder.GeocodeListener {
+                        override fun onGeocode(addresses: MutableList<Address>) {
+                            if (continuation.isActive) continuation.resume(addresses)
+                        }
 
-                    override fun onError(errorMessage: String?) {
-                        if (continuation.isActive) continuation.resumeWithException(
-                            IOException(errorMessage ?: "附近地点查询失败")
-                        )
-                    }
-                })
-            } catch (error: Exception) {
-                if (continuation.isActive) continuation.resumeWithException(error)
+                        override fun onError(errorMessage: String?) {
+                            if (continuation.isActive) continuation.resumeWithException(
+                                IOException(errorMessage ?: "附近地点查询失败")
+                            )
+                        }
+                    })
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
             }
+        } else {
+            withContext(Dispatchers.IO) { geocoder.getFromLocation(track.lat, track.lon, 10).orEmpty() }
         }
-    } else {
-        withContext(Dispatchers.IO) { geocoder.getFromLocation(track.lat, track.lon, 10).orEmpty() }
+        GeocoderDiagnostics.record(
+            context = context,
+            source = "nearby_place_candidates",
+            latitude = track.lat,
+            longitude = track.lon,
+            requestId = track.requestId,
+            addresses = addresses,
+        )
+        NearbyPlaceCandidates.prepare(addresses.flatMap(Address::toRawNearbyPlaces), track.lat, track.lon)
+    } catch (error: Throwable) {
+        GeocoderDiagnostics.record(
+            context = context,
+            source = "nearby_place_candidates",
+            latitude = track.lat,
+            longitude = track.lon,
+            requestId = track.requestId,
+            error = error,
+        )
+        throw error
     }
-    return NearbyPlaceCandidates.prepare(addresses.mapNotNull(Address::toRawNearbyPlace), track.lat, track.lon)
 }
 
 private suspend fun resolveSharedPlace(text: String): PlaceResolution {

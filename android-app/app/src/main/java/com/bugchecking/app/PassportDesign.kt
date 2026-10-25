@@ -91,6 +91,27 @@ fun primaryPageSelectedColor(): Color = MaterialTheme.colorScheme.secondaryConta
     alpha = if (isSystemInDarkTheme()) 0.76f else 0.74f,
 )
 
+private val FavoriteLightContainers = listOf(
+    Color(0xFFC7E1DD), Color(0xFF9EDBD3), Color(0xFF65D7C8),
+)
+private val FavoriteDarkContainers = listOf(
+    Color(0xFF294744), Color(0xFF315E59), Color(0xFF397A71),
+)
+
+@Composable
+fun trackFavoriteContainerColor(tier: Int): Color {
+    if (tier !in 1..3) return primaryPageCardColor()
+    return (if (isSystemInDarkTheme()) FavoriteDarkContainers else FavoriteLightContainers)[tier - 1]
+        .copy(alpha = 0.68f)
+}
+
+@Composable
+fun trackFavoriteContentColor(tier: Int): Color = when {
+    tier !in 1..3 -> MaterialTheme.colorScheme.onSurface
+    isSystemInDarkTheme() -> Color(0xFFDDF8F3)
+    else -> Color(0xFF123B37)
+}
+
 private val PassportInk = Color(0xFF172A3A)
 private val RouteBlue = Color(0xFF4B69A2)
 private val CandyBlue = Color(0xFFD9E5FF)

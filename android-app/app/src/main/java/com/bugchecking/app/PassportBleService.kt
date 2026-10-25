@@ -19,13 +19,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationManager
 import android.location.Geocoder
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.CancellationSignal
 import android.util.Log
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -424,12 +422,34 @@ class PassportBleService : Service() {
             if (saved && Geocoder.isPresent()) {
                 Thread {
                     runCatching {
-                        val address = Geocoder(this).getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull()
-                        if (address != null) {
-                            val label = address.featureName ?: address.locality ?: address.getAddressLine(0)
-                            db.enrichTrackFromSystem(requestId, label.orEmpty(), address.getAddressLine(0))
+                        val addresses = Geocoder(this).getFromLocation(location.latitude, location.longitude, 10).orEmpty()
+                        GeocoderDiagnostics.record(
+                            context = this,
+                            source = "track_saved_auto_name",
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            requestId = requestId,
+                            addresses = addresses,
+                        )
+                        val best = addresses.bestGeocoderLabel()
+                        if (best != null) {
+                            db.enrichTrackFromSystem(
+                                requestId,
+                                best.candidate.text,
+                                best.address.getAddressLine(0),
+                            )
                             broadcast(STATE, "地点信息已更新", dataChanged = true)
                         }
+                    }.onFailure { error ->
+                        GeocoderDiagnostics.record(
+                            context = this,
+                            source = "track_saved_auto_name",
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            requestId = requestId,
+                            error = error,
+                        )
+                        Log.w(TAG, "reverse geocoder failed for request=$requestId", error)
                     }
                 }.start()
             }
@@ -450,60 +470,7 @@ class PassportBleService : Service() {
 
     @Suppress("MissingPermission")
     private fun getCurrentLocation(callback: (Location?) -> Unit) {
-        val manager = getSystemService(LocationManager::class.java)
-        val providers = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
-            .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
-        val provider = providers.firstOrNull()
-        if (provider == null) { callback(null); return }
-        val cached = providers.mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }
-            .maxByOrNull { it.time }
-        if (cached != null && System.currentTimeMillis() - cached.time < 120_000) {
-            callback(cached)
-            return
-        }
-        if (Build.VERSION.SDK_INT >= 30) {
-            val cancellation = CancellationSignal()
-            var completed = false
-            val timeout = Runnable {
-                if (!completed) {
-                    completed = true; cancellation.cancel(); callback(null)
-                }
-            }
-            main.postDelayed(timeout, 20_000)
-            try {
-                manager.getCurrentLocation(provider, cancellation,
-                    java.util.concurrent.Executor { task -> main.post(task) }) { location ->
-                    main.removeCallbacks(timeout)
-                    if (!completed) { completed = true; callback(location) }
-                }
-            } catch (_: SecurityException) {
-                main.removeCallbacks(timeout)
-                if (!completed) { completed = true; callback(null) }
-            }
-        } else {
-            var completed = false
-            var timeout: Runnable? = null
-            val listener = object : android.location.LocationListener {
-                override fun onLocationChanged(location: Location) {
-                    if (completed) return
-                    completed = true; timeout?.let(main::removeCallbacks)
-                    runCatching { manager.removeUpdates(this) }; callback(location)
-                }
-                @Deprecated("Deprecated by Android")
-                override fun onStatusChanged(providerName: String?, status: Int, extras: android.os.Bundle?) = Unit
-                override fun onProviderEnabled(providerName: String) = Unit
-                override fun onProviderDisabled(providerName: String) = Unit
-            }
-            try {
-                manager.requestSingleUpdate(provider, listener, main.looper)
-                timeout = Runnable {
-                    if (!completed) {
-                        completed = true; runCatching { manager.removeUpdates(listener) }; callback(null)
-                    }
-                }
-                main.postDelayed(timeout, 20_000)
-            } catch (_: SecurityException) { callback(null) }
-        }
+        BestEffortLocation.request(this, callback = callback)
     }
 
     private fun sendResult(request: Int, success: Boolean, code: Int = 0) {

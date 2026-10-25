@@ -11,6 +11,7 @@ data class RawNearbyPlace(
     val address: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    val specificity: Int = 0,
 )
 
 data class NearbyPlaceCandidate(
@@ -19,6 +20,7 @@ data class NearbyPlaceCandidate(
     val latitude: Double?,
     val longitude: Double?,
     val distanceMeters: Int?,
+    val specificity: Int = 0,
 )
 
 object NearbyPlaceCandidates {
@@ -36,8 +38,12 @@ object NearbyPlaceCandidates {
                 value.latitude != null && value.longitude != null &&
                 value.latitude in -90.0..90.0 && value.longitude in -180.0..180.0
             ) distanceMeters(originLatitude, originLongitude, value.latitude, value.longitude) else null
-            NearbyPlaceCandidate(name, value.address, value.latitude, value.longitude, distance)
-        }.sortedWith(compareBy<NearbyPlaceCandidate> { it.distanceMeters == null }.thenBy { it.distanceMeters ?: Int.MAX_VALUE })
+            NearbyPlaceCandidate(name, value.address, value.latitude, value.longitude, distance, value.specificity)
+        }.sortedWith(
+            compareByDescending<NearbyPlaceCandidate> { it.specificity }
+                .thenBy { it.distanceMeters == null }
+                .thenBy { it.distanceMeters ?: Int.MAX_VALUE }
+        )
             .distinctBy { it.name.lowercase().replace(Regex("[\\s·・,，()（）-]+"), "") }
             .take(limit)
     }

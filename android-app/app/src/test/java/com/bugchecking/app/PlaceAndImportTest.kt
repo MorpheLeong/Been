@@ -88,6 +88,17 @@ class PlaceAndImportTest {
         assertFalse(PlaceLinkParser.isSupportedUrl("https://google.com.example.org/maps"))
     }
 
+    @Test fun clipboardPromptAcceptsShareTextContainingAUrl() {
+        val shared = "外滩源\nhttps://surl.amap.com/example\n值得一去"
+        assertEquals(shared, clipboardMapShareCandidate("  $shared  "))
+    }
+
+    @Test fun clipboardPromptIgnoresPlainTextAndEmptyContent() {
+        assertEquals(null, clipboardMapShareCandidate("外滩源，值得一去"))
+        assertEquals(null, clipboardMapShareCandidate("   "))
+        assertEquals(null, clipboardMapShareCandidate(null))
+    }
+
     @Test fun parsesQuotedCsvAndChoosesNamedColumn() {
         val rows = ImportEngine.parseDelimited("编号,景点,说明\r\n1,故宫博物院,上午\r\n2,\"颐和园,东宫门\",下午", ',')
         assertEquals("颐和园,东宫门", rows[2][1])
@@ -246,7 +257,9 @@ class PlaceAndImportTest {
             ),
             ZoneId.of("UTC"),
         )
-        assertEquals(1, segments.size)
-        assertEquals(listOf(1L, 2L), segments.single().map { it.id })
+        val drawableSegments = segments.filter { it.tracks.size > 1 }
+        assertEquals(1, drawableSegments.size)
+        assertEquals(listOf(1L, 2L), drawableSegments.single().tracks.map { it.id })
+        assertEquals(listOf(3L), segments.single { it.tracks.size == 1 }.tracks.map { it.id })
     }
 }

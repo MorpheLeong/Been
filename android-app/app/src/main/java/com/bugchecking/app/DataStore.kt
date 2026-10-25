@@ -6,6 +6,9 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.UUID
 
+private const val TRACK_COLUMNS =
+    "id,request_id,destination_id,name,lat,lon,time,accuracy,provider,address,place_id,original_url,canonical_url,resolution_state,entry_source,favorite_tier"
+
 data class TrackPoint(
     val id: Long,
     val requestId: String,
@@ -22,6 +25,7 @@ data class TrackPoint(
     val canonicalUrl: String? = null,
     val resolutionState: PlaceResolutionState = PlaceResolutionState.MANUAL_CONFIRMATION,
     val entrySource: TrackEntrySource = TrackEntrySource.CHECK_IN,
+    val favoriteTier: Int = 0,
 )
 enum class TrackEntrySource { CHECK_IN, MANUAL }
 data class Destination(val id: String, val name: String, val order: Int, val done: Boolean, val qrId: String?)
@@ -48,9 +52,10 @@ data class PassportProfile(
 )
 
 /** Local-only store: QR payloads and precise coordinates are never uploaded to Passport. */
-class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", null, 7) {
+class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", null, 8) {
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE tracks(id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, destination_id TEXT, name TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, time INTEGER NOT NULL, accuracy REAL NOT NULL, provider TEXT NOT NULL DEFAULT 'MANUAL', address TEXT, place_id TEXT, original_url TEXT, canonical_url TEXT, resolution_state TEXT NOT NULL DEFAULT 'MANUAL_CONFIRMATION', entry_source TEXT NOT NULL DEFAULT 'CHECK_IN')")
+        db.execSQL("CREATE TABLE tracks(id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE NOT NULL, destination_id TEXT, name TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, time INTEGER NOT NULL, accuracy REAL NOT NULL, provider TEXT NOT NULL DEFAULT 'MANUAL', address TEXT, place_id TEXT, original_url TEXT, canonical_url TEXT, resolution_state TEXT NOT NULL DEFAULT 'MANUAL_CONFIRMATION', entry_source TEXT NOT NULL DEFAULT 'CHECK_IN', favorite_tier INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE INDEX idx_tracks_favorite_time ON tracks(favorite_tier, time DESC)")
         db.execSQL("CREATE TABLE destinations(id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0, qr_id TEXT)")
         db.execSQL("CREATE TABLE qrs(id TEXT PRIMARY KEY, name TEXT NOT NULL, payload TEXT NOT NULL, starred INTEGER NOT NULL DEFAULT 0, created_order INTEGER NOT NULL DEFAULT 0, starred_order INTEGER)")
         createSettingsTables(db)
@@ -96,6 +101,15 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
             }
             db.execSQL("UPDATE qrs SET created_order=rowid WHERE created_order=0")
             db.execSQL("UPDATE qrs SET starred_order=created_order WHERE starred=1 AND starred_order IS NULL")
+        }
+        if (oldVersion < 8) {
+            val trackColumns = db.rawQuery("PRAGMA table_info(tracks)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) }
+            }
+            if ("favorite_tier" !in trackColumns) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN favorite_tier INTEGER NOT NULL DEFAULT 0")
+            }
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_tracks_favorite_time ON tracks(favorite_tier, time DESC)")
         }
         val profileColumns = db.rawQuery("PRAGMA table_info(profile)", null).use { c ->
             buildSet { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) }
@@ -161,14 +175,31 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
             )
         })
     }
-    @Synchronized fun tracks(): List<TrackPoint> = readableDatabase.rawQuery("SELECT id,request_id,destination_id,name,lat,lon,time,accuracy,provider,address,place_id,original_url,canonical_url,resolution_state,entry_source FROM tracks ORDER BY time DESC LIMIT 300", null).use { c ->
-        buildList { while (c.moveToNext()) add(TrackPoint(
-            c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getDouble(4), c.getDouble(5),
-            c.getLong(6), c.getFloat(7), enumOrDefault(c.getString(8), PlaceProvider.MANUAL), c.getString(9),
-            c.getString(10), c.getString(11), c.getString(12),
-            enumOrDefault(c.getString(13), PlaceResolutionState.MANUAL_CONFIRMATION),
-            enumOrDefault(c.getString(14), TrackEntrySource.CHECK_IN),
-        )) }
+    @Synchronized fun tracks(): List<TrackPoint> = queryTracks(
+        "SELECT $TRACK_COLUMNS FROM tracks ORDER BY time DESC LIMIT 300",
+    )
+    @Synchronized fun favoriteTracks(): List<TrackPoint> = queryTracks(
+        "SELECT $TRACK_COLUMNS FROM tracks WHERE favorite_tier BETWEEN 1 AND 3 ORDER BY time DESC",
+    )
+    @Synchronized fun track(id: Long): TrackPoint? = queryTracks(
+        "SELECT $TRACK_COLUMNS FROM tracks WHERE id=? LIMIT 1",
+        arrayOf(id.toString()),
+    ).firstOrNull()
+    private fun queryTracks(sql: String, args: Array<String>? = null): List<TrackPoint> =
+        readableDatabase.rawQuery(sql, args).use { c ->
+            buildList { while (c.moveToNext()) add(TrackPoint(
+                c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getDouble(4), c.getDouble(5),
+                c.getLong(6), c.getFloat(7), enumOrDefault(c.getString(8), PlaceProvider.MANUAL), c.getString(9),
+                c.getString(10), c.getString(11), c.getString(12),
+                enumOrDefault(c.getString(13), PlaceResolutionState.MANUAL_CONFIRMATION),
+                enumOrDefault(c.getString(14), TrackEntrySource.CHECK_IN),
+                c.getInt(15).coerceIn(0, 3),
+            )) }
+        }
+    @Synchronized fun setTrackFavoriteTier(id: Long, tier: Int): Boolean {
+        require(tier in 0..3) { "收藏档位必须在 0 到 3 之间" }
+        val values = ContentValues().apply { put("favorite_tier", tier) }
+        return writableDatabase.update("tracks", values, "id=?", arrayOf(id.toString())) == 1
     }
     @Synchronized fun hasTrack(requestId: String): Boolean = readableDatabase.rawQuery("SELECT 1 FROM tracks WHERE request_id=?", arrayOf(requestId)).use { it.moveToFirst() }
     @Synchronized fun updateTrackName(id: Long, name: String) {

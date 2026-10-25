@@ -54,6 +54,7 @@ import org.maplibre.android.maps.MapLibreMap
 import java.text.DateFormat
 import java.util.Date
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.floor
 import kotlin.math.pow
@@ -62,6 +63,7 @@ private const val OPENFREEMAP_LIGHT_STYLE = "https://tiles.openfreemap.org/style
 private const val OPENFREEMAP_DARK_STYLE = "https://tiles.openfreemap.org/styles/dark"
 
 internal data class TrackCluster(val tracks: List<TrackPoint>, val latitude: Double, val longitude: Double)
+internal data class TrackDaySegment(val date: LocalDate, val tracks: List<TrackPoint>)
 
 internal fun clusterTracks(rows: List<TrackPoint>, zoom: Double): List<TrackCluster> {
     if (rows.isEmpty()) return emptyList()
@@ -71,9 +73,14 @@ internal fun clusterTracks(rows: List<TrackPoint>, zoom: Double): List<TrackClus
     }
 }
 
-internal fun dailyTrackSegments(rows: List<TrackPoint>, zoneId: ZoneId = ZoneId.systemDefault()): List<List<TrackPoint>> =
-    rows.groupBy { Instant.ofEpochMilli(it.time).atZone(zoneId).toLocalDate() }
-        .values.map { it.sortedBy(TrackPoint::time) }.filter { it.size > 1 }
+internal fun dailyTrackSegments(
+    rows: List<TrackPoint>,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): List<TrackDaySegment> = rows
+    .groupBy { Instant.ofEpochMilli(it.time).atZone(zoneId).toLocalDate() }
+    .entries
+    .sortedBy(Map.Entry<LocalDate, List<TrackPoint>>::key)
+    .map { (date, tracks) -> TrackDaySegment(date, tracks.sortedBy(TrackPoint::time)) }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -151,8 +158,9 @@ internal fun TrackMapScreen(
         if (loading) return@LaunchedEffect
         current.clear()
         dailyTrackSegments(rows).forEach { day ->
+            if (day.tracks.size < 2) return@forEach
                 current.addPolyline(
-                    PolylineOptions().addAll(day.map { LatLng(it.lat, it.lon) }).color(routeColor).width(4f)
+                    PolylineOptions().addAll(day.tracks.map { LatLng(it.lat, it.lon) }).color(routeColor).width(4f)
                 )
             }
         val markerRows = mutableMapOf<Long, TrackCluster>()

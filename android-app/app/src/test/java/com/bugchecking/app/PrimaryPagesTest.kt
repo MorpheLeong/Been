@@ -10,6 +10,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.Calendar
 
 class PrimaryPagesTest {
@@ -131,6 +134,29 @@ class PrimaryPagesTest {
         assertEquals("手动坐标", trackAccuracyLabel(manual))
     }
 
+    @Test fun mapTrackLinesAreSplitByLocalDateAndOrderedWithinEachDay() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        fun point(id: Long, day: Int, hour: Int) = TrackPoint(
+            id = id,
+            requestId = "track-$id",
+            destinationId = null,
+            name = "地点$id",
+            lat = 31.0 + id / 1000.0,
+            lon = 121.0 + id / 1000.0,
+            time = ZonedDateTime.of(2026, 10, day, hour, 0, 0, 0, zone).toInstant().toEpochMilli(),
+            accuracy = 10f,
+        )
+        val segments = dailyTrackSegments(
+            listOf(point(3, 20, 9), point(2, 19, 18), point(1, 19, 8)),
+            zone,
+        )
+
+        assertEquals(listOf(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 20)), segments.map { it.date })
+        assertEquals(listOf(1L, 2L), segments[0].tracks.map { it.id })
+        assertEquals(listOf(3L), segments[1].tracks.map { it.id })
+        assertEquals(2, segments.size)
+    }
+
     @Test fun reorderHelperMovesOneStableIdWithoutDroppingItems() {
         assertEquals(listOf("b", "c", "a"), moveChecklistId(listOf("a", "b", "c"), "a", "c"))
         assertEquals(listOf("a", "b", "c"), moveChecklistId(listOf("a", "b", "c"), "x", "c"))
@@ -152,6 +178,46 @@ class PrimaryPagesTest {
         assertEquals(8, result.get(Calendar.HOUR_OF_DAY))
         assertEquals(9, result.get(Calendar.MINUTE))
         assertEquals(47, result.get(Calendar.SECOND))
+    }
+
+    @Test fun favoriteHoldTimingStartsOneSecondAfterSystemLongPress() {
+        val systemLongPress = 500L
+        assertEquals(0, favoriteTierAt(499L, systemLongPress))
+        assertEquals(0, favoriteTierAt(1_499L, systemLongPress))
+        assertEquals(1, favoriteTierAt(1_500L, systemLongPress))
+        assertEquals(1, favoriteTierAt(2_499L, systemLongPress))
+        assertEquals(2, favoriteTierAt(2_500L, systemLongPress))
+        assertEquals(2, favoriteTierAt(3_499L, systemLongPress))
+        assertEquals(3, favoriteTierAt(3_500L, systemLongPress))
+        assertEquals(3, favoriteTierAt(30_000L, systemLongPress))
+    }
+
+    @Test fun favoriteFiltersByMultipleListsNameAndStoredUrls() {
+        fun favorite(
+            id: Long,
+            name: String,
+            tier: Int,
+            time: Long,
+            originalUrl: String? = null,
+            canonicalUrl: String? = null,
+        ) = TrackPoint(
+            id, "track-$id", null, name, 31.0, 121.0, time, 10f,
+            originalUrl = originalUrl,
+            canonicalUrl = canonicalUrl,
+            favoriteTier = tier,
+        )
+        val tracks = listOf(
+            favorite(1, "栗Cafe", 1, 100, originalUrl = "https://amap.com/place/coffee"),
+            favorite(2, "外滩", 3, 300, canonicalUrl = "https://maps.google.com/BUND"),
+            favorite(3, "面馆", 2, 200),
+            favorite(4, "未收藏", 0, 400),
+        )
+
+        assertEquals(listOf(2L, 3L, 1L), filterFavoriteTracks(tracks, setOf(1, 2, 3), "").map { it.id })
+        assertEquals(listOf(3L, 1L), filterFavoriteTracks(tracks, setOf(1, 2), "").map { it.id })
+        assertEquals(listOf(1L), filterFavoriteTracks(tracks, setOf(1), "cafe").map { it.id })
+        assertEquals(listOf(2L), filterFavoriteTracks(tracks, setOf(3), "bund").map { it.id })
+        assertEquals(emptyList<Long>(), filterFavoriteTracks(tracks, emptySet(), "").map { it.id })
     }
 
     @Test fun avatarGestureKeepsTheTouchedImagePointUnderTheFingers() {
