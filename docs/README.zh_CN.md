@@ -199,6 +199,7 @@ LICENSE                  仓库许可证
 
 | 入口 | 你可以找到 |
 | --- | --- |
+| [BugChecking Android 设计系统](DESIGN.zh_CN.md) · [UI/UX 审计](ux-audit-android-2026-10-28.zh_CN.md) | Android 视觉／交互强制规范与当前基于证据的审计待办 |
 | [开发指南](development/README.zh_CN.md) | AI 工作流、工程规范、CI 与发布流程 |
 | [AI 技能](../skills/README.zh_CN.md) | 开发、环境准备、构建、真机测试与故障诊断 |
 | [硬件资料](hardware-design/README.zh_CN.md) | 板卡事实、接口边界、验收清单与排障 |

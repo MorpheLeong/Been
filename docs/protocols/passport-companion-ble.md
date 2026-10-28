@@ -29,7 +29,7 @@ On first use, the app opens Android system Bluetooth settings and lets the syste
 
 ### Track capture
 
-Four bytes: version 0x03, opcode 0x01, request ID uint16. The app obtains the current location and persists it locally with the localized track label. It sends success only after persistence; otherwise it sends a failure result. The app database retains every track until the user deletes it manually. The Passport stores and displays only records from the current day in the phone's current time zone; the time and offset returned by the app remove the previous day's device records, and the device applies the same cleanup when its clock crosses local midnight.
+Four bytes: version 0x03, opcode 0x01, request ID uint16. The app obtains the current location and persists it locally with the localized track label. It sends success only after persistence; otherwise it sends a failure result. The app database retains every track until the user deletes it manually. The Passport stores at most 32 records from the current local date and the preceding two local dates. The returned time and offset drive this rolling cleanup, which the device also applies as its clock crosses local midnight.
 
 ### Checklist check-in
 
@@ -57,7 +57,17 @@ An 11-byte success frame contains version 0x03, result opcode 0x81, status 0x00,
 
 A 6-byte failure frame contains version 0x03, opcode 0x81, nonzero status, request ID uint16, and error code uint8.
 
-The device stores only the timestamp and checklist item name from a successful response; it receives no latitude or longitude. Only a successful response allows it to advance the current item.
+The success timestamp is the immutable timestamp of the saved phone record, not the later time at which a retry is transmitted. The device stores the timestamp, request ID, and checklist item name; it receives no latitude or longitude. Only a successful response allows it to advance the current item.
+
+## Asynchronous track-name update
+
+Reverse geocoding and manual edits never delay the success result. The app sends names separately on the snapshot characteristic using an acknowledged, CRC-protected transaction. A batch contains at most the latest 32 device-originated tracks; records already pruned by the device are accepted as no-ops. The app replays the latest batch after each secure connection, so edits made while disconnected need no separate pending table.
+
+- Begin (10 bytes): version `03`, opcode `19`, revision uint16, payload length uint16, CRC32 uint32.
+- Chunk: version `03`, opcode `1A`, revision uint16, offset uint16, then negotiated-MTU-sized data.
+- Commit (4 bytes): version `03`, opcode `1B`, revision uint16.
+
+The payload starts with count uint8. Each item contains request ID uint16, the original track Unix UTC seconds uint32, UTF-8 name length uint8, and 1–47 name bytes. Request ID plus timestamp identifies a record and repeated updates are idempotent. Names must contain valid UTF-8 without control characters. Firmware reuses the existing snapshot receive buffer; track-name and ordinary snapshot transactions are serialized. A new app treats rejection of these optional opcodes by old firmware as a skipped name batch without failing location results or ordinary synchronization.
 
 ## App-to-device snapshot
 

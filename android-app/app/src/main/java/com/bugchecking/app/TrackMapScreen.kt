@@ -1,5 +1,10 @@
 package com.bugchecking.app
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -51,6 +56,8 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.annotations.Icon
+import org.maplibre.android.annotations.IconFactory
 import java.text.DateFormat
 import java.util.Date
 import java.time.Instant
@@ -73,6 +80,9 @@ internal fun clusterTracks(rows: List<TrackPoint>, zoom: Double): List<TrackClus
     }
 }
 
+internal fun clusterFavoriteTier(cluster: TrackCluster): Int =
+    cluster.tracks.maxOfOrNull(TrackPoint::favoriteTier)?.coerceIn(0, 3) ?: 0
+
 internal fun dailyTrackSegments(
     rows: List<TrackPoint>,
     zoneId: ZoneId = ZoneId.systemDefault(),
@@ -93,10 +103,20 @@ internal fun TrackMapScreen(
     val context = LocalContext.current
     val darkTheme = isSystemInDarkTheme()
     val routeColor = MaterialTheme.colorScheme.primary.toArgb()
+    val markerOutlineColor = MaterialTheme.colorScheme.surface.toArgb()
+    val favoriteMarkerColors = (1..3).map { trackFavoriteMapColor(it).toArgb() }
     val lifecycleOwner = LocalLifecycleOwner.current
     val mapView = remember {
         MapLibre.getInstance(context)
         MapView(context).also { it.onCreate(Bundle()) }
+    }
+    val ordinaryMarkerIcon = remember(routeColor, markerOutlineColor) {
+        createTrackMarkerIcon(context, routeColor, markerOutlineColor, favorite = false)
+    }
+    val favoriteMarkerIcons = remember(favoriteMarkerColors, markerOutlineColor) {
+        favoriteMarkerColors.map { color ->
+            createTrackMarkerIcon(context, color, markerOutlineColor, favorite = true)
+        }
     }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var selected by remember { mutableStateOf<TrackPoint?>(null) }
@@ -153,7 +173,7 @@ internal fun TrackMapScreen(
         if (loading) error = "底图加载失败或网络不可用"
     }
 
-    LaunchedEffect(map, rows, zoom, loading, routeColor) {
+    LaunchedEffect(map, rows, zoom, loading, routeColor, markerOutlineColor) {
         val current = map ?: return@LaunchedEffect
         if (loading) return@LaunchedEffect
         current.clear()
@@ -165,9 +185,11 @@ internal fun TrackMapScreen(
             }
         val markerRows = mutableMapOf<Long, TrackCluster>()
         clusterTracks(rows.take(300), zoom).forEach { cluster ->
+            val favoriteTier = clusterFavoriteTier(cluster)
             val marker = current.addMarker(
                 MarkerOptions()
                     .position(LatLng(cluster.latitude, cluster.longitude))
+                    .icon(if (favoriteTier > 0) favoriteMarkerIcons[favoriteTier - 1] else ordinaryMarkerIcon)
                     .title(if (cluster.tracks.size == 1) cluster.tracks[0].name else "${cluster.tracks.size} 个地点")
                     .snippet(if (cluster.tracks.size == 1) formatTrackTime(cluster.tracks[0]) else "点按放大")
             )
@@ -249,3 +271,46 @@ internal fun TrackMapScreen(
 }
 
 private fun formatTrackTime(track: TrackPoint): String = DateFormat.getDateTimeInstance().format(Date(track.time))
+
+private fun createTrackMarkerIcon(
+    context: Context,
+    fillColor: Int,
+    outlineColor: Int,
+    favorite: Boolean,
+): Icon {
+    val density = context.resources.displayMetrics.density
+    val size = (36f * density).toInt().coerceAtLeast(36)
+    val center = size / 2f
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = fillColor
+        style = Paint.Style.FILL
+    }
+    val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = outlineColor
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f * density
+        strokeJoin = Paint.Join.ROUND
+    }
+    if (favorite) {
+        val path = Path()
+        val outerRadius = 14f * density
+        val innerRadius = 6.2f * density
+        repeat(10) { point ->
+            val angle = Math.toRadians(-90.0 + point * 36.0)
+            val radius = if (point % 2 == 0) outerRadius else innerRadius
+            val x = center + (kotlin.math.cos(angle) * radius).toFloat()
+            val y = center + (kotlin.math.sin(angle) * radius).toFloat()
+            if (point == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        canvas.drawPath(path, fill)
+        canvas.drawPath(path, outline)
+    } else {
+        val radius = 9f * density
+        canvas.drawCircle(center, center, radius, fill)
+        canvas.drawCircle(center, center, radius, outline)
+    }
+    return IconFactory.getInstance(context).fromBitmap(bitmap)
+}

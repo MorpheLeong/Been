@@ -7,6 +7,7 @@
 #include "passport_avatar.h"
 #include "passport_avatar_protocol.h"
 #include "passport_trip_store.h"
+#include "passport_track_name_protocol.h"
 #include "passport_display_policy.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -39,6 +40,7 @@ static const ble_uuid128_t SNAPSHOT_UUID = BLE_UUID128_INIT(PASSPORT_BLE_SNAPSHO
 
 static uint16_t s_request_value_handle;
 static passport_trip_model_t *s_trip_model;
+static passport_location_model_t *s_location_model;
 static passport_trip_rx_t s_trip_rx;
 static passport_avatar_rx_t s_avatar_rx;
 static volatile uint16_t s_connection = BLE_HS_CONN_HANDLE_NONE;
@@ -147,6 +149,17 @@ static int snapshot_access(uint16_t connection, uint16_t attribute,
         ble_hs_mbuf_to_flat(context->om, frame, sizeof(frame), &length) != 0)
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     if (length < 2) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (frame[1] >= PASSPORT_TRACK_NAMES_BEGIN_OPCODE &&
+        frame[1] <= PASSPORT_TRACK_NAMES_COMMIT_OPCODE) {
+        if (s_location_model == NULL) return BLE_ATT_ERR_UNLIKELY;
+        bool changed = false;
+        if (!passport_track_name_sync_frame(&s_trip_rx, s_location_model,
+                                             frame, length, &changed))
+            return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
+        if (frame[1] == PASSPORT_TRACK_NAMES_COMMIT_OPCODE && changed)
+            (void)notify_app(PASSPORT_BLE_TRACK_NAMES, NULL);
+        return 0;
+    }
     if (frame[1] >= PASSPORT_AVATAR_BEGIN_OPCODE &&
         frame[1] <= PASSPORT_AVATAR_CLEAR_OPCODE) {
         passport_avatar_action_t action;
@@ -527,6 +540,11 @@ void passport_ble_link_bind_trip_model(passport_trip_model_t *model)
     s_trip_model = model;
     memset(&s_trip_rx, 0, sizeof(s_trip_rx));
     memset(&s_avatar_rx, 0, sizeof(s_avatar_rx));
+}
+
+void passport_ble_link_bind_location_model(passport_location_model_t *model)
+{
+    s_location_model = model;
 }
 
 esp_err_t passport_ble_link_request_location(uint16_t request_id)

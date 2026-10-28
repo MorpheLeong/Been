@@ -594,11 +594,9 @@ static void draw_marker(void)
 static void draw_history(void)
 {
     base_screen("记录历史");
-    const size_t total_rows = s_records.count;
-    const size_t start = s_history_page * 7;
-    const size_t rows = (total_rows - (start < total_rows ? start : total_rows)) < 7
-                      ? total_rows - (start < total_rows ? start : total_rows) : 7;
-    if (total_rows == 0) {
+    const size_t page_count = passport_location_model_history_page_count(&s_records);
+    if (page_count == 0) {
+        s_history_page = 0;
         lv_obj_t *card = panel(s_screen, 8, 48, 224, 214);
         label(card, "还没有轨迹记录", 16, 22, 190, 24, C_DIM,
               &lv_font_montserrat_14);
@@ -607,35 +605,54 @@ static void draw_history(void)
         finish_screen();
         return;
     }
-    for (size_t i = 0; i < rows; ++i) {
-        const passport_marker_t *m = passport_location_model_newest(&s_records, start + i);
+    if (s_history_page >= page_count) s_history_page = page_count - 1;
+    passport_history_page_t page;
+    if (!passport_location_model_history_page(&s_records, s_history_page, &page)) {
+        finish_screen();
+        return;
+    }
+
+    char date_text[64];
+    const time_t day_time = (time_t)(page.local_day * 86400);
+    struct tm day_tm;
+    if (gmtime_r(&day_time, &day_tm) != NULL) {
+        if (page.page_count_for_day > 1) {
+            (void)snprintf(date_text, sizeof(date_text), "%02d月%02d日  %u/%u",
+                           day_tm.tm_mon + 1, day_tm.tm_mday,
+                           (unsigned)(page.page_in_day + 1),
+                           (unsigned)page.page_count_for_day);
+        } else {
+            (void)snprintf(date_text, sizeof(date_text), "%02d月%02d日",
+                           day_tm.tm_mon + 1, day_tm.tm_mday);
+        }
+    } else {
+        (void)snprintf(date_text, sizeof(date_text), "日期");
+    }
+    lv_obj_t *date_row = panel(s_screen, 8, 48, 224, 26);
+    label(date_row, date_text, 7, 4, 208, 19, C_GREEN, &lv_font_montserrat_14);
+
+    for (size_t i = 0; i < page.record_count; ++i) {
+        const passport_marker_t *m = passport_location_model_newest(
+            &s_records, page.first_newest_offset + i);
         char line[64];
         if (m == NULL) continue;
-        if ((m->flags & PASSPORT_MARKER_HAS_PLACE_NAME) != 0)
-            (void)snprintf(line, sizeof(line), "#%lu  %s", (unsigned long)m->id,
-                           m->place_name);
-        else if ((m->flags & PASSPORT_MARKER_HAS_COORDINATES) != 0)
-            (void)snprintf(line, sizeof(line), "#%lu  %.5f, %.5f",
-                           (unsigned long)m->id, m->latitude_e7 / 10000000.0,
-                           m->longitude_e7 / 10000000.0);
-        else {
-            const time_t local = (time_t)m->timestamp_utc +
-                                 (time_t)m->utc_offset_minutes * 60;
-            struct tm tm_value;
-            if (m->timestamp_utc > 0 && gmtime_r(&local, &tm_value) != NULL)
-                (void)snprintf(line, sizeof(line), "#%lu  %02d:%02d  仅时间",
-                               (unsigned long)m->id, tm_value.tm_hour, tm_value.tm_min);
-            else
-                (void)snprintf(line, sizeof(line), "#%lu  仅时间",
-                               (unsigned long)m->id);
-        }
-        lv_obj_t *row = panel(s_screen, 8, 48 + (int)i * 31, 224, 27);
+        const time_t local = (time_t)m->timestamp_utc +
+                             (time_t)m->utc_offset_minutes * 60;
+        struct tm tm_value;
+        const char *place = (m->flags & PASSPORT_MARKER_HAS_PLACE_NAME) != 0
+                          ? m->place_name : "地点名称待同步";
+        if (m->timestamp_utc > 0 && gmtime_r(&local, &tm_value) != NULL)
+            (void)snprintf(line, sizeof(line), "%02d:%02d  %s",
+                           tm_value.tm_hour, tm_value.tm_min, place);
+        else
+            (void)snprintf(line, sizeof(line), "--:--  %s", place);
+        lv_obj_t *row = panel(s_screen, 8, 78 + (int)i * 29, 224, 26);
         label(row, line, 7, 4, 208, 19, C_WHITE, &lv_font_montserrat_14);
     }
     char page_text[32];
     (void)snprintf(page_text, sizeof(page_text), "%u / %u  上下翻页",
                    (unsigned)(s_history_page + 1),
-                   (unsigned)((total_rows + 6) / 7));
+                   (unsigned)page_count);
     label(s_screen, page_text, 24, 263, 196, 17, C_DIM, &lv_font_montserrat_14);
     finish_screen();
 }
@@ -821,16 +838,16 @@ static void update_marker_screen(void)
     }
 }
 
-static bool retain_current_history_day(int64_t timestamp_utc,
+static bool retain_recent_history_days(int64_t timestamp_utc,
                                        int16_t utc_offset_minutes)
 {
-    const size_t removed = passport_location_model_retain_local_day(
-        &s_records, timestamp_utc, utc_offset_minutes);
+    const size_t removed = passport_location_model_retain_local_days(
+        &s_records, timestamp_utc, utc_offset_minutes, 3);
     if (removed == 0) return false;
     s_history_page = 0;
     if (passport_store_can_save() && passport_store_save(&s_records) != ESP_OK)
         ESP_LOGE(TAG, "Could not persist daily history rollover");
-    ESP_LOGI(TAG, "Removed %u device history records outside the current local day",
+    ESP_LOGI(TAG, "Removed %u device history records outside the recent three local days",
              (unsigned)removed);
     return true;
 }
@@ -857,7 +874,7 @@ static void process_ble_event(const app_event_t *item)
     if (item->data.ble.event == PASSPORT_BLE_TIME) {
         const passport_ble_result_t *time_result = &item->data.ble.result;
         s_local_utc_offset_minutes = time_result->utc_offset_minutes;
-        const bool history_changed = retain_current_history_day(
+        const bool history_changed = retain_recent_history_days(
             time_result->timestamp_utc, time_result->utc_offset_minutes);
         const struct timeval tv = {
             .tv_sec = (time_t)time_result->timestamp_utc,
@@ -938,6 +955,15 @@ static void process_ble_event(const app_event_t *item)
         }
         return;
     }
+    if (item->data.ble.event == PASSPORT_BLE_TRACK_NAMES) {
+        if (passport_store_can_save() && passport_store_save(&s_records) != ESP_OK)
+            ESP_LOGE(TAG, "Track names changed but device NVS save failed");
+        if (s_app.screen == PASSPORT_SCREEN_HISTORY && bsp_lvgl_lock(500)) {
+            draw_history();
+            bsp_lvgl_unlock();
+        }
+        return;
+    }
 
     const passport_ble_result_t *result = &item->data.ble.result;
     if (s_marker_flow.phase != PASSPORT_MARKER_WAITING ||
@@ -955,13 +981,13 @@ static void process_ble_event(const app_event_t *item)
 
     const bool records_location = passport_marker_flow_records_location(&s_marker_flow);
     const size_t history_removed = records_location
-        ? passport_location_model_retain_local_day(
-              &s_records, result->timestamp_utc, result->utc_offset_minutes)
+        ? passport_location_model_retain_local_days(
+              &s_records, result->timestamp_utc, result->utc_offset_minutes, 3)
         : 0;
     const bool history_pruned = history_removed > 0;
     if (history_pruned) {
         s_history_page = 0;
-        ESP_LOGI(TAG, "Removed %u device history records before adding today's result",
+        ESP_LOGI(TAG, "Removed %u old device history records before adding result",
                  (unsigned)history_removed);
     }
     uint32_t marker_id = 0;
@@ -970,7 +996,8 @@ static void process_ble_event(const app_event_t *item)
         recorded = passport_trip_model_set_completed(&s_trip, s_active_destination_id, false);
     } else {
         recorded = passport_location_model_add(
-            &s_records, result->timestamp_utc, result->utc_offset_minutes, &marker_id);
+            &s_records, result->timestamp_utc, result->utc_offset_minutes,
+            result->request_id, &marker_id);
         if (recorded && s_marker_flow.operation == PASSPORT_MARKER_CHECKIN) {
             recorded = passport_location_model_set_place(&s_records, marker_id,
                                                            s_active_destination_name) &&
@@ -1254,7 +1281,7 @@ static void process_input(const app_event_t *ev)
     }
     if ((key == PASSPORT_INPUT_UP || key == PASSPORT_INPUT_DOWN) &&
         s_app.screen == PASSPORT_SCREEN_HISTORY) {
-        const size_t page_count = (s_records.count + 6) / 7;
+        const size_t page_count = passport_location_model_history_page_count(&s_records);
         if (page_count > 0) {
             if (key == PASSPORT_INPUT_UP)
                 s_history_page = (s_history_page + page_count - 1) % page_count;
@@ -1287,7 +1314,7 @@ static void input_task(void *arg)
         if (now_us - last_history_day_check_us >= 1000000) {
             last_history_day_check_us = now_us;
             const time_t now = time(NULL);
-            if (retain_current_history_day((int64_t)now, s_local_utc_offset_minutes) &&
+            if (retain_recent_history_days((int64_t)now, s_local_utc_offset_minutes) &&
                 s_app.screen == PASSPORT_SCREEN_HISTORY && bsp_lvgl_lock(500)) {
                 draw_history();
                 bsp_lvgl_unlock();
@@ -1332,6 +1359,7 @@ void app_main(void)
     passport_display_policy_init(&s_display_policy, esp_timer_get_time(),
                                  passport_trip_store_screen_timeout());
     passport_ble_link_bind_trip_model(&s_trip);
+    passport_ble_link_bind_location_model(&s_records);
     const passport_marker_t *newest = passport_location_model_newest(&s_records, 0);
     if (newest != NULL) {
         s_local_utc_offset_minutes = newest->utc_offset_minutes;

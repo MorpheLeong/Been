@@ -54,6 +54,7 @@ class PassportBleService : Service() {
         val value: ByteArray,
         val opcode: Int = -1,
         val attempts: Int = 0,
+        val optionalTrackNameBatch: Int? = null,
     )
     private val writes = java.util.ArrayDeque<PendingWrite>()
     private var currentWrite: PendingWrite? = null
@@ -109,7 +110,18 @@ class PassportBleService : Service() {
                 reconnects = 0
                 syncWhenConnected = true
                 startForeground(NOTIFICATION_ID, notification("正在连接 BugChecking"))
-                if (ready) syncSnapshot() else connectOrScan()
+                if (ready) {
+                    syncSnapshot()
+                    syncTrackNames()
+                } else connectOrScan()
+            }
+            ACTION_TRACK_NAME_SYNC -> {
+                stopping = false
+                reconnectAllowed = true
+                reconnects = 0
+                startForeground(NOTIFICATION_ID, notification("正在同步地点名称"))
+                val trackId = intent.getLongExtra(EXTRA_TRACK_ID, -1L).takeIf { it > 0 }
+                if (ready) syncTrackNames(trackId) else connectOrScan()
             }
             else -> {
                 // START_STICKY restarts only a service the user previously started. We
@@ -287,6 +299,7 @@ class PassportBleService : Service() {
                     reconnects = 0
                     broadcast(STATE, "已安全连接，等待 Passport 指令")
                     if (syncWhenConnected) syncSnapshot() else syncClock()
+                    syncTrackNames()
                 } else {
                     reconnectAllowed = false
                     val state = if (status == BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION ||
@@ -321,6 +334,8 @@ class PassportBleService : Service() {
             } else if (completed.characteristic == PassportProtocol.snapshot &&
                 completed.opcode == PassportProtocol.TIME_SYNC) {
                 broadcast(STATE, "已安全连接，设备时间已同步")
+            } else if (completed.opcode == PassportProtocol.TRACK_NAMES_COMMIT) {
+                broadcast(STATE, "地点名称已同步到 Passport")
             } else if (completed.characteristic == PassportProtocol.result) {
                 broadcast(STATE, "定位结果已回传 Passport")
             }
@@ -385,11 +400,12 @@ class PassportBleService : Service() {
             return
         }
         val requestId = "device-" + parsed.request + "-" + parsed.destinationId
-        if (db.hasTrack(requestId)) {
+        val existingTrack = db.trackByRequestId(requestId)
+        if (existingTrack != null) {
             if (parsed.destinationId.isNotEmpty()) {
                 db.markDestinationDone(parsed.destinationId)
             }
-            sendResult(parsed.request, true)
+            sendResult(parsed.request, true, timestampMillis = existingTrack.time)
             broadcast(STATE, "轨迹已存在，结果已重新回传 Passport", dataChanged = true)
             return
         }
@@ -409,15 +425,16 @@ class PassportBleService : Service() {
 
     private fun finishCheckIn(request: PassportProtocol.CheckIn, location: Location?, error: Int) {
         var saved = false
+        var recordedAt = System.currentTimeMillis()
         if (location != null) {
             val requestId = "device-" + request.request + "-" + request.destinationId
-            val savedAt = System.currentTimeMillis()
+            recordedAt = System.currentTimeMillis()
             Log.w(TAG, "location result request=${request.request} provider=${location.provider} " +
                 "lat=${location.latitude} lon=${location.longitude} accuracy_m=${location.accuracy} " +
-                "location_time_ms=${location.time} saved_at_ms=$savedAt")
+                "location_time_ms=${location.time} saved_at_ms=$recordedAt")
             saved = db.hasTrack(requestId) || db.saveTrackOnce(
                 requestId, request.destinationId, request.name, location.latitude, location.longitude,
-                savedAt, location.accuracy
+                recordedAt, location.accuracy
             )
             if (saved && Geocoder.isPresent()) {
                 Thread {
@@ -438,6 +455,8 @@ class PassportBleService : Service() {
                                 best.candidate.text,
                                 best.address.getAddressLine(0),
                             )
+                            val updated = db.trackByRequestId(requestId)
+                            main.post { if (updated != null) syncTrackNames(updated.id) }
                             broadcast(STATE, "地点信息已更新", dataChanged = true)
                         }
                     }.onFailure { error ->
@@ -460,7 +479,7 @@ class PassportBleService : Service() {
             if (request.destinationId.isNotEmpty()) db.markDestinationDone(request.destinationId)
             Log.w(TAG, "track saved request=${request.request} destination=${request.destinationId}")
             broadcast(STATE, "轨迹已保存，正在回传 Passport", dataChanged = true)
-            sendResult(request.request, true)
+            sendResult(request.request, true, timestampMillis = recordedAt)
         } else {
             sendResult(request.request, false, if (location == null) error else 3)
             broadcast(STATE, if (location == null) "定位失败，Passport 清单未推进" else "记录保存失败，Passport 清单未推进")
@@ -473,7 +492,12 @@ class PassportBleService : Service() {
         BestEffortLocation.request(this, callback = callback)
     }
 
-    private fun sendResult(request: Int, success: Boolean, code: Int = 0) {
+    private fun sendResult(
+        request: Int,
+        success: Boolean,
+        code: Int = 0,
+        timestampMillis: Long = System.currentTimeMillis(),
+    ) {
         val g = gatt ?: run {
             broadcast(STATE, "连接已断开，无法发送打卡结果")
             return
@@ -484,7 +508,9 @@ class PassportBleService : Service() {
         }
         val pending = PendingWrite(
             PassportProtocol.result,
-            PassportProtocol.checkInResult(request, success, code),
+            PassportProtocol.checkInResult(
+                request, success, code, timestampMillis = timestampMillis,
+            ),
         )
         writes.addFirst(pending)
         pumpWrites(g)
@@ -538,6 +564,39 @@ class PassportBleService : Service() {
         }
     }
 
+    private fun syncTrackNames(trackId: Long? = null) {
+        val g = gatt ?: return
+        if (!ready || g.getService(PassportProtocol.service)
+                ?.getCharacteristic(PassportProtocol.snapshot) == null) return
+        val generation = syncGeneration
+        val batchRevision = ++revision
+        val chunkPayload = (negotiatedMtu - SNAPSHOT_FRAME_OVERHEAD)
+            .coerceIn(LEGACY_CHUNK_PAYLOAD, MAX_CHUNK_PAYLOAD)
+        syncExecutor.execute {
+            val tracks = if (trackId == null) db.deviceTracksForNameSync()
+                else listOfNotNull(db.track(trackId))
+            val frames = runCatching {
+                PassportProtocol.trackNameFrames(batchRevision, tracks, chunkPayload)
+            }.getOrElse {
+                Log.w(TAG, "Could not prepare track-name batch", it)
+                emptyList()
+            }
+            main.post {
+                if (generation != syncGeneration || gatt !== g || !ready || frames.isEmpty())
+                    return@post
+                frames.forEach { frame ->
+                    writes.addLast(PendingWrite(
+                        PassportProtocol.snapshot,
+                        frame,
+                        opcode = frame[1].toInt() and 0xff,
+                        optionalTrackNameBatch = batchRevision,
+                    ))
+                }
+                pumpWrites(g)
+            }
+        }
+    }
+
     private fun syncClock() {
         val g = gatt ?: return
         if (g.getService(PassportProtocol.service)?.getCharacteristic(PassportProtocol.snapshot) == null) {
@@ -584,6 +643,14 @@ class PassportBleService : Service() {
     }
 
     private fun failWrite(write: PendingWrite) {
+        if (write.optionalTrackNameBatch != null) {
+            val failedBatch = write.optionalTrackNameBatch
+            writes.removeAll { it.optionalTrackNameBatch == failedBatch }
+            Log.w(TAG, "Track-name batch $failedBatch was rejected; keeping phone data for retry")
+            broadcast(STATE, "设备固件暂未接收地点名称，稍后将重试")
+            gatt?.let(::pumpWrites)
+            return
+        }
         writes.clear()
         currentWrite = null
         main.removeCallbacks(writeTimeout)
@@ -754,10 +821,12 @@ class PassportBleService : Service() {
         const val ACTION_START = "com.bugchecking.app.START_BLE"
         const val ACTION_STOP = "com.bugchecking.app.STOP_BLE"
         const val ACTION_SYNC = "com.bugchecking.app.SYNC"
+        const val ACTION_TRACK_NAME_SYNC = "com.bugchecking.app.SYNC_TRACK_NAME"
         const val STATE = "com.bugchecking.app.BLE_STATE"
         const val EXTRA_STATE = "state"
         const val EXTRA_CONNECTED = "connected"
         const val EXTRA_DATA_CHANGED = "data_changed"
+        const val EXTRA_TRACK_ID = "track_id"
         private const val TAG = "PassportBleService"
         private const val CHANNEL_ID = "passport_ble"
         private const val NOTIFICATION_ID = 40

@@ -235,6 +235,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppDataBackup.syncSchedule(this)
         val darkStatusBar = resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
@@ -264,6 +265,14 @@ class MainActivity : ComponentActivity() {
                     { pendingShare.value = null })
             }
         }
+    }
+    override fun onStart() {
+        super.onStart()
+        AppDataBackup.enqueueCatchUp(this)
+    }
+    override fun onStop() {
+        AppDataBackup.enqueueCatchUp(this)
+        super.onStop()
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -338,7 +347,7 @@ private enum class Tab(val route: String, val title: String, val label: String, 
 private object Routes {
     const val TrackMap = "track-map"
     const val TrackFavorites = "track-favorites"
-    const val TrackFavoriteEdit = "track-favorite-edit"
+    const val PlaceDetail = "place-detail"
     const val TrackCreate = "track-create"
     const val TrackEdit = "track-edit"
     const val ChecklistImport = "checklist-import"
@@ -354,7 +363,7 @@ private fun NavBackStackEntry.isSecondaryDestination(): Boolean {
     val route = destination.route.orEmpty()
     return route == Routes.TrackMap || route == Routes.TrackFavorites || route == Routes.TrackCreate ||
         route == Routes.ChecklistImport || route.startsWith(Routes.TrackEdit) ||
-        route.startsWith(Routes.TrackFavoriteEdit) || route.startsWith(Routes.QrEdit) ||
+        route.startsWith(Routes.PlaceDetail) || route.startsWith(Routes.QrEdit) ||
         route.startsWith(Routes.QrPresent) || route.startsWith(Routes.AvatarCrop)
 }
 
@@ -410,6 +419,7 @@ private fun PassportApp(
     var initialImportSource by remember { mutableStateOf<ImportSource?>(null) }
     var initialMapLink by remember { mutableStateOf<String?>(null) }
     var pendingMapShare by remember { mutableStateOf<String?>(null) }
+    var trackFocusTarget by remember { mutableStateOf<TrackPoint?>(null) }
     var lastSyncedRevision by remember { mutableIntStateOf(0) }
     var statusOverlayMessage by remember { mutableStateOf<String?>(null) }
     var deviceStatusInitialized by remember { mutableStateOf(false) }
@@ -417,11 +427,19 @@ private fun PassportApp(
     val destinations = remember(revision, externalRevision) { db.destinations() }
     val qrs = remember(revision, externalRevision) { db.qrs() }
     val tracks = remember(revision, externalRevision) { db.tracks() }
-    val favoriteTracks = remember(revision, externalRevision) { db.favoriteTracks() }
+    val savedPlaces = remember(revision, externalRevision) { db.savedPlaces() }
     val profile = remember(revision, externalRevision) { db.profile() }
     val volume = remember(revision, externalRevision) { db.soundVolume() }
     val screenTimeout = remember(revision, externalRevision) { db.screenTimeoutSeconds() }
     val refresh: () -> Unit = { revision++ }
+    val syncTrackName: (Long) -> Unit = { trackId ->
+        ContextCompat.startForegroundService(
+            context,
+            Intent(context, PassportBleService::class.java)
+                .setAction(PassportBleService.ACTION_TRACK_NAME_SYNC)
+                .putExtra(PassportBleService.EXTRA_TRACK_ID, trackId),
+        )
+    }
     LaunchedEffect(bleState) {
         if (resolveSyncStatus(bleConnected, bleState, revision > lastSyncedRevision) == PassportSyncStatus.SYNCED) {
             lastSyncedRevision = revision
@@ -461,6 +479,7 @@ private fun PassportApp(
         onSharedSourceConsumed()
     }
     fun openTab(tab: Tab) {
+        if (tab != Tab.Tracks) trackFocusTarget = null
         navController.navigate(tab.route) {
             popUpTo(Tab.Tracks.route) { saveState = true }
             launchSingleTop = true
@@ -499,7 +518,7 @@ private fun PassportApp(
                             onClick = { navController.navigate(Routes.TrackFavorites) },
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) { Icon(Icons.Default.Star, contentDescription = "打开收藏轨迹") }
+                        ) { Icon(Icons.Default.Star, contentDescription = "打开地点库") }
                         Spacer(Modifier.height(PassportSpacing.sm))
                         FloatingActionButton(
                             onClick = { navController.navigate(Routes.TrackMap) },
@@ -514,7 +533,12 @@ private fun PassportApp(
                 },
             ) {
                 TracksPage(
-                    tracks,
+                    rows = remember(tracks, trackFocusTarget) {
+                        val target = trackFocusTarget
+                        if (target == null || tracks.any { it.id == target.id }) tracks
+                        else (tracks + target).sortedByDescending(TrackPoint::time)
+                    },
+                    focusTrackId = trackFocusTarget?.id,
                     edit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
                     favorite = { track, tier ->
                         runCatching { db.setTrackFavoriteTier(track.id, tier) }
@@ -590,6 +614,7 @@ private fun PassportApp(
                         db.setScreenTimeoutSeconds(value); refresh()
                         Toast.makeText(context, "亮屏时长已保存到手机", Toast.LENGTH_SHORT).show()
                     },
+                    onDataImported = refresh,
                 )
             }
         }
@@ -601,51 +626,40 @@ private fun PassportApp(
             )
         }
         detailComposable(route = Routes.TrackFavorites) {
-            TrackFavoritesScreen(
-                tracks = favoriteTracks,
+            PlaceLibraryScreen(
+                places = savedPlaces,
                 onBack = { navController.popBackStack() },
-                onEdit = { navController.navigate("${Routes.TrackFavoriteEdit}/${it.id}") },
+                onOpen = { navController.navigate("${Routes.PlaceDetail}/${it.id}") },
             )
         }
         detailComposable(
-            route = "${Routes.TrackFavoriteEdit}/{trackId}",
-            arguments = listOf(navArgument("trackId") { type = NavType.LongType }),
+            route = "${Routes.PlaceDetail}/{placeId}",
+            arguments = listOf(navArgument("placeId") { type = NavType.StringType }),
         ) { entry ->
-            val trackId = entry.arguments?.getLong("trackId") ?: -1L
-            val track = favoriteTracks.firstOrNull { it.id == trackId } ?: db.track(trackId)
-            if (track == null) {
+            val placeId = entry.arguments?.getString("placeId").orEmpty()
+            val place = savedPlaces.firstOrNull { it.id == placeId } ?: db.savedPlace(placeId)
+            if (place == null) {
                 LaunchedEffect(Unit) { navController.popBackStack() }
             } else {
-                val updateFavorite: (Int) -> Unit = { tier ->
-                    runCatching { db.setTrackFavoriteTier(track.id, tier) }
-                        .onSuccess { updated ->
-                            if (updated) refresh()
-                            else {
-                                Toast.makeText(context, "轨迹已不存在", Toast.LENGTH_SHORT).show()
-                                navController.popBackStack()
-                            }
+                PlaceDetailScreen(
+                    place = place,
+                    visits = remember(place.id, revision, externalRevision) { db.tracksForSavedPlace(place.id) },
+                    onBack = { navController.popBackStack() },
+                    onSave = { name, tier, originalUrl, canonicalUrl ->
+                        runCatching { db.updateSavedPlace(place.id, name, tier, originalUrl, canonicalUrl) }
+                            .onSuccess { refresh(); navController.popBackStack() }
+                            .onFailure { Toast.makeText(context, "场所保存失败", Toast.LENGTH_LONG).show() }
+                    },
+                    onOpenTrack = { track ->
+                        trackFocusTarget = track
+                        if (!navController.popBackStack(Tab.Tracks.route, inclusive = false)) {
+                            openTab(Tab.Tracks)
                         }
-                        .onFailure { Toast.makeText(context, "收藏更新失败", Toast.LENGTH_LONG).show() }
-                }
-                if (track.entrySource == TrackEntrySource.MANUAL) {
-                    ManualTrackEditorScreen(
-                        track = track,
-                        favoriteOnly = true,
-                        onBack = { navController.popBackStack() },
-                        onFavorite = updateFavorite,
-                        onSave = {},
-                    )
-                } else {
-                    TrackEditorScreen(
-                        track = track,
-                        favoriteOnly = true,
-                        onBack = { navController.popBackStack() },
-                        onDelete = {},
-                        onFavorite = updateFavorite,
-                        onSave = {},
-                        onApplyPlace = {},
-                    )
-                }
+                    },
+                    onUnlinkTrack = { track ->
+                        if (db.unlinkTrackFromSavedPlace(track.id)) refresh()
+                    },
+                )
             }
         }
         detailComposable(
@@ -687,8 +701,16 @@ private fun PassportApp(
                     onBack = { initialMapLink = null; navController.popBackStack() },
                     onDelete = { db.deleteTrack(track.id); refresh(); initialMapLink = null; navController.popBackStack() },
                     onFavorite = { tier -> db.setTrackFavoriteTier(track.id, tier); refresh() },
-                    onSave = { name -> db.updateTrackName(track.id, name); refresh(); initialMapLink = null; navController.popBackStack() },
-                    onApplyPlace = { place -> db.updateTrackPlace(track.id, place); refresh(); initialMapLink = null; navController.popBackStack() },
+                    onSave = { name ->
+                        db.updateTrackName(track.id, name)
+                        syncTrackName(track.id)
+                        refresh(); initialMapLink = null; navController.popBackStack()
+                    },
+                    onApplyPlace = { place ->
+                        db.updateTrackPlace(track.id, place)
+                        syncTrackName(track.id)
+                        refresh(); initialMapLink = null; navController.popBackStack()
+                    },
                 )
             }
         }
@@ -941,6 +963,7 @@ private fun ProfileSettingsPage(
     onAvatarCropRequested: (String) -> Unit,
     onVolumeSave: (Int) -> Unit,
     onScreenTimeoutSave: (Int) -> Unit,
+    onDataImported: () -> Unit,
 ) {
     var nickname by remember(profile) { mutableStateOf(profile.nickname) }
     var bio by remember(profile) { mutableStateOf(profile.bio) }
@@ -1035,6 +1058,8 @@ private fun ProfileSettingsPage(
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+
+        BackupSettingsSection(onDataImported = onDataImported)
     }
 }
 
@@ -1201,6 +1226,7 @@ private fun AlwaysStretchColumn(
 @Composable
 private fun TracksPage(
     rows: List<TrackPoint>,
+    focusTrackId: Long? = null,
     edit: (TrackPoint) -> Unit,
     favorite: (TrackPoint, Int) -> Boolean,
 ) {
@@ -1208,6 +1234,26 @@ private fun TracksPage(
     val dayLabelFormat = remember { SimpleDateFormat("M月d日 EEEE", Locale.CHINA) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val groups = remember(rows) { rows.groupBy { dayFormat.format(Date(it.time)) } }
+    val listState = rememberLazyListState()
+    var lastFocusedTrackId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val focusedItemIndex = remember(groups, focusTrackId) {
+        var index = 0
+        var result: Int? = null
+        groups.values.forEach { dayRows ->
+            index += 1 // Date header.
+            dayRows.forEach { row ->
+                if (row.id == focusTrackId) result = index
+                index += 1
+            }
+        }
+        result
+    }
+    LaunchedEffect(focusTrackId, focusedItemIndex) {
+        if (focusTrackId != null && focusTrackId != lastFocusedTrackId && focusedItemIndex != null) {
+            listState.animateScrollToItem(focusedItemIndex)
+            lastFocusedTrackId = focusTrackId
+        }
+    }
     if (rows.isEmpty()) {
         AlwaysStretchColumn(
             modifier = Modifier.fillMaxSize(),
@@ -1229,6 +1275,7 @@ private fun TracksPage(
         }
     } else AlwaysStretchLazyColumn(
             modifier = Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(top = PassportSpacing.lg, bottom = 104.dp),
         ) {
             groups.forEach { (_, dayRows) ->
@@ -1279,6 +1326,8 @@ private fun TracksPage(
                                     style = MaterialTheme.typography.titleMedium,
                                     color = contentColor,
                                     modifier = Modifier.fillMaxWidth(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
                                     "${timeFormat.format(Date(row.time))} · ${trackAccuracyLabel(row)}",

@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "passport_location_protocol.h"
+#include "passport_location_model.h"
 #include "passport_trip_model.h"
 
 typedef enum {
@@ -16,6 +17,7 @@ typedef enum {
     PASSPORT_BLE_FAILED,
     PASSPORT_BLE_SETTINGS,
     PASSPORT_BLE_TIME,
+    PASSPORT_BLE_TRACK_NAMES,
     PASSPORT_BLE_PAIRING_CODE,
     PASSPORT_BLE_REQUEST_FAILED,
 } passport_ble_event_t;
@@ -34,5 +36,6 @@ esp_err_t passport_ble_link_request_uncheckin(uint16_t request_id,
                                               const char *destination_id,
                                               const char *destination_name);
 void passport_ble_link_bind_trip_model(passport_trip_model_t *model);
+void passport_ble_link_bind_location_model(passport_location_model_t *model);
 bool passport_ble_link_is_connected(void);
 uint32_t passport_ble_link_pairing_code(void);

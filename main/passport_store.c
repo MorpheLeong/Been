@@ -11,7 +11,8 @@
 
 #define STORE_NAMESPACE "passport"
 #define STORE_KEY "records"
-#define STORE_VERSION 1U
+#define STORE_VERSION 2U
+#define STORE_LEGACY_VERSION 1U
 
 typedef struct {
     uint32_t magic;
@@ -43,18 +44,27 @@ static uint32_t blob_crc(const store_blob_t *blob)
     return crc32_bytes((const uint8_t *)&blob->model, sizeof(blob->model));
 }
 
-static esp_err_t load_blob(nvs_handle_t handle, passport_location_model_t *model)
+static esp_err_t load_blob(nvs_handle_t handle, passport_location_model_t *model,
+                           bool *migration_needed)
 {
+    if (migration_needed != NULL) *migration_needed = false;
     store_blob_t *blob = malloc(sizeof(*blob));
     if (blob == NULL) return ESP_ERR_NO_MEM;
     size_t size = sizeof(*blob);
     esp_err_t err = nvs_get_blob(handle, STORE_KEY, blob, &size);
     if (err == ESP_OK &&
         (size != sizeof(*blob) || blob->magic != 0x41505031U ||
-         blob->version != STORE_VERSION || blob->payload_size != sizeof(blob->model) ||
-         blob->crc32 != blob_crc(blob) || !passport_location_model_valid(&blob->model))) {
+         (blob->version != STORE_VERSION && blob->version != STORE_LEGACY_VERSION) ||
+         blob->payload_size != sizeof(blob->model) || blob->crc32 != blob_crc(blob))) {
         err = ESP_ERR_INVALID_CRC;
     }
+    if (err == ESP_OK && blob->version == STORE_LEGACY_VERSION) {
+        for (size_t i = 0; i < PASSPORT_MARKER_CAPACITY; ++i)
+            blob->model.markers[i].source_request_id = 0;
+        if (migration_needed != NULL) *migration_needed = true;
+    }
+    if (err == ESP_OK && !passport_location_model_valid(&blob->model))
+        err = ESP_ERR_INVALID_CRC;
     if (err == ESP_OK) *model = blob->model;
     free(blob);
     return err;
@@ -134,14 +144,21 @@ esp_err_t passport_store_init(passport_location_model_t *model)
     }
 
     bool storage_valid = false;
-    err = load_blob(handle, model);
+    bool migration_needed = false;
+    err = load_blob(handle, model, &migration_needed);
     if (err == ESP_OK) {
-        storage_valid = true;
+        if (migration_needed) {
+            err = write_blob(handle, model);
+            if (err == ESP_OK)
+                ESP_LOGI(TAG, "Migrated location records to storage version %u",
+                         (unsigned)STORE_VERSION);
+        }
+        storage_valid = err == ESP_OK;
     } else if (err == ESP_ERR_NVS_NOT_FOUND) {
         nvs_handle_t legacy;
         esp_err_t legacy_err = nvs_open(STORE_NAMESPACE, NVS_READONLY, &legacy);
         if (legacy_err == ESP_OK) {
-            legacy_err = load_blob(legacy, model);
+            legacy_err = load_blob(legacy, model, NULL);
             nvs_close(legacy);
         }
         if (legacy_err == ESP_OK) {

@@ -22,15 +22,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -252,14 +258,14 @@ internal fun FavoriteTierDialog(
     var selectedTier by remember(currentTier) { mutableIntStateOf(currentTier) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("收藏这条轨迹") },
+        title = { Text("收藏这个场所") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
                 trackFavoriteLists.forEach { list ->
-                    FavoriteTierChoice(list.stars, list.name, selectedTier == list.tier) { selectedTier = list.tier }
+                    FavoriteTierChoice(list.name, selectedTier == list.tier) { selectedTier = list.tier }
                 }
                 if (currentTier > 0) {
-                    FavoriteTierChoice("", "取消收藏", selectedTier == 0) { selectedTier = 0 }
+                    FavoriteTierChoice("取消收藏", selectedTier == 0) { selectedTier = 0 }
                 }
             }
         },
@@ -269,31 +275,31 @@ internal fun FavoriteTierDialog(
 }
 
 @Composable
-private fun FavoriteTierChoice(stars: String, name: String, selected: Boolean, onClick: () -> Unit) {
+private fun FavoriteTierChoice(name: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = PassportSpacing.minTouchTarget)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected, onClick)
-        Text(listOf(stars, name).filter(String::isNotBlank).joinToString(" "), style = MaterialTheme.typography.bodyLarge)
+        Text(name, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun TrackFavoritesScreen(
-    tracks: List<TrackPoint>,
+internal fun PlaceLibraryScreen(
+    places: List<SavedPlace>,
     onBack: () -> Unit,
-    onEdit: (TrackPoint) -> Unit,
+    onOpen: (SavedPlace) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var filterMask by rememberSaveable { mutableIntStateOf(0b111) }
     val selectedTiers = remember(filterMask) { (1..3).filterTo(mutableSetOf()) { filterMask and (1 shl (it - 1)) != 0 } }
-    val filtered = remember(tracks, selectedTiers, query) { filterFavoriteTracks(tracks, selectedTiers, query) }
+    val filtered = remember(places, selectedTiers, query) { filterSavedPlaces(places, selectedTiers, query) }
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
-    PassportPageScaffold(title = "收藏轨迹", onBack = onBack) { padding ->
+    PassportPageScaffold(title = "地点库", onBack = onBack) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).widthIn(max = PassportSpacing.listMaxWidth)
                 .padding(horizontal = PassportSpacing.md),
@@ -304,7 +310,7 @@ internal fun TrackFavoritesScreen(
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth().padding(top = PassportSpacing.md),
                 singleLine = true,
-                label = { Text("搜索地点或地图链接") },
+                label = { Text("搜索场所或地图链接") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
@@ -319,31 +325,201 @@ internal fun TrackFavoritesScreen(
             }
             when {
                 filterMask == 0 -> FavoriteEmptyState("请选择至少一个收藏列表")
-                tracks.isEmpty() -> FavoriteEmptyState("还没有收藏轨迹")
-                filtered.isEmpty() -> FavoriteEmptyState("没有符合条件的收藏轨迹")
+                places.isEmpty() -> FavoriteEmptyState("还没有收藏场所")
+                filtered.isEmpty() -> FavoriteEmptyState("没有符合条件的场所")
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = PassportSpacing.lg),
                     verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
                 ) {
-                    items(filtered, key = TrackPoint::id) { track ->
-                        val list = trackFavoriteList(track.favoriteTier)
+                    items(filtered, key = SavedPlace::id) { place ->
+                        val list = trackFavoriteList(place.favoriteTier)
                         Card(
-                            onClick = { onEdit(track) },
+                            onClick = { onOpen(place) },
                             colors = CardDefaults.cardColors(
-                                containerColor = trackFavoriteContainerColor(track.favoriteTier),
-                                contentColor = trackFavoriteContentColor(track.favoriteTier),
+                                containerColor = trackFavoriteContainerColor(place.favoriteTier),
+                                contentColor = trackFavoriteContentColor(place.favoriteTier),
                             ),
                             modifier = Modifier.fillMaxWidth().semantics {
-                                contentDescription = "${track.name}，${list?.stars.orEmpty()}${list?.name.orEmpty()}，${dateFormat.format(Date(track.time))}"
+                                contentDescription = "${place.name}，${list?.stars.orEmpty()}${list?.name.orEmpty()}，到访 ${place.visitCount} 次"
                             },
                         ) {
-                            Text(track.name, Modifier.padding(PassportSpacing.md), style = MaterialTheme.typography.titleMedium)
+                            Column(Modifier.padding(PassportSpacing.md)) {
+                                Text(place.name, style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    buildString {
+                                        append("到访 ${place.visitCount} 次")
+                                        place.lastVisitedAt?.let { append(" · 最近 ${dateFormat.format(Date(it))}") }
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = trackFavoriteContentColor(place.favoriteTier).copy(alpha = 0.76f),
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun PlaceDetailScreen(
+    place: SavedPlace,
+    visits: List<TrackPoint>,
+    onBack: () -> Unit,
+    onSave: (name: String, tier: Int, originalUrl: String?, canonicalUrl: String?) -> Unit,
+    onOpenTrack: (TrackPoint) -> Unit,
+    onUnlinkTrack: (TrackPoint) -> Unit,
+) {
+    var name by rememberSaveable(place.id) { mutableStateOf(place.name) }
+    val initialLink = place.originalUrl ?: place.canonicalUrl.orEmpty()
+    var mapLink by rememberSaveable(place.id) { mutableStateOf(initialLink) }
+    var tier by rememberSaveable(place.id) { mutableIntStateOf(place.favoriteTier) }
+    var tierDialogOpen by rememberSaveable(place.id) { mutableStateOf(false) }
+    var pendingUnlink by remember { mutableStateOf<TrackPoint?>(null) }
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
+    val identity = when {
+        !place.providerPlaceId.isNullOrBlank() -> "识别依据：${place.provider.name} 场所 ID"
+        !place.canonicalUrl.isNullOrBlank() -> "识别依据：规范化地图链接"
+        else -> "识别依据：名称与到访坐标"
+    }
+
+    PassportPageScaffold(
+        title = "场所详情",
+        onBack = onBack,
+        primaryActionLabel = "保存场所",
+        primaryActionEnabled = name.isNotBlank(),
+        onPrimaryAction = {
+            val cleanLink = mapLink.trim().takeIf(String::isNotEmpty)
+            val canonical = place.canonicalUrl.takeIf { mapLink == initialLink }
+            onSave(name, tier, cleanLink, canonical)
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding).widthIn(max = PassportSpacing.formMaxWidth)
+                .padding(horizontal = PassportSpacing.md),
+            contentPadding = PaddingValues(top = PassportSpacing.md, bottom = PassportSpacing.xl),
+        ) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.md)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("场所名称") },
+                        singleLine = true,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
+                        OutlinedTextField(
+                            value = mapLink,
+                            onValueChange = { mapLink = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("地图分享链接") },
+                            minLines = 2,
+                        )
+                        Text(
+                            identity,
+                            modifier = Modifier.padding(horizontal = PassportSpacing.sm),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedCard(
+                        onClick = { tierDialogOpen = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                                .padding(horizontal = PassportSpacing.md, vertical = PassportSpacing.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
+                                Text(
+                                    "收藏列表",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    trackFavoriteList(tier)?.name ?: "未收藏",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                            }
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = "选择收藏列表")
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.padding(top = PassportSpacing.sm, bottom = PassportSpacing.xs),
+                        verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("关联轨迹", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                            Text(
+                                "${visits.size} 条",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "用于核验是否误将不同地点识别为同一场所；解除关联不会删除轨迹。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            if (visits.isEmpty()) {
+                item { FavoriteEmptyState("这个场所还没有关联轨迹") }
+            } else {
+                itemsIndexed(visits, key = { _, track -> track.id }) { index, track ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { onOpenTrack(track) }
+                            .heightIn(min = 56.dp)
+                            .padding(start = PassportSpacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            dateFormat.format(Date(track.time)),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { pendingUnlink = track }) {
+                            Icon(Icons.Default.LinkOff, contentDescription = "解除与这条轨迹的关联")
+                        }
+                    }
+                    if (index < visits.lastIndex) {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            HorizontalDivider(
+                                modifier = Modifier.fillMaxWidth(0.84f),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.62f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (tierDialogOpen) FavoriteTierDialog(
+        currentTier = tier,
+        onDismiss = { tierDialogOpen = false },
+        onSave = {
+            tier = it
+            tierDialogOpen = false
+        },
+    )
+
+    pendingUnlink?.let { track ->
+        AlertDialog(
+            onDismissRequest = { pendingUnlink = null },
+            title = { Text("解除场所关联？") },
+            text = { Text("“${track.name}”会保留为独立轨迹，但不再显示这个场所的收藏星标。") },
+            confirmButton = {
+                TextButton(onClick = { onUnlinkTrack(track); pendingUnlink = null }) { Text("解除关联") }
+            },
+            dismissButton = { TextButton(onClick = { pendingUnlink = null }) { Text("取消") } },
+        )
     }
 }
 

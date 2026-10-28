@@ -24,6 +24,9 @@ internal object PassportProtocol {
     const val AVATAR_CHUNK = 0x16
     const val AVATAR_COMMIT = 0x17
     const val AVATAR_CLEAR = 0x18
+    const val TRACK_NAMES_BEGIN = 0x19
+    const val TRACK_NAMES_CHUNK = 0x1a
+    const val TRACK_NAMES_COMMIT = 0x1b
     const val AVATAR_FORMAT_RGB565_LE = 1
     const val CHECK_IN_FRAGMENT = 0x42
 
@@ -65,11 +68,20 @@ internal object PassportProtocol {
         CheckIn(request, opcode, id, nameBytes.toString(Charsets.UTF_8))
     }.getOrNull()
 
-    fun checkInResult(request: Int, success: Boolean, code: Int = 0): ByteArray {
+    fun checkInResult(
+        request: Int,
+        success: Boolean,
+        code: Int = 0,
+        timestampMillis: Long = System.currentTimeMillis(),
+        offsetMinutes: Int = java.time.OffsetDateTime.now().offset.totalSeconds / 60,
+    ): ByteArray {
         val b = ByteBuffer.allocate(if (success) 11 else 6).order(ByteOrder.LITTLE_ENDIAN)
             .put(VERSION.toByte()).put(CHECK_IN_RESULT.toByte()).put(if (success) 0 else 1)
             .putShort(request.toShort())
-        if (success) b.putInt((System.currentTimeMillis() / 1000L).toInt()).putShort(java.time.OffsetDateTime.now().offset.totalSeconds.div(60).toShort())
+        if (success) {
+            require(timestampMillis >= 1_577_836_800_000L && offsetMinutes in -840..840)
+            b.putInt((timestampMillis / 1000L).toInt()).putShort(offsetMinutes.toShort())
+        }
         else b.put(code.toByte())
         return b.array()
     }
@@ -109,19 +121,63 @@ internal object PassportProtocol {
 
     /** MTU-aware frames; caller writes them in order and only reports a sync after commit. */
     fun snapshotFrames(revision: Int, payload: ByteArray, chunkPayload: Int = 14): List<ByteArray> {
+        return transferFrames(
+            revision, payload, chunkPayload,
+            SNAPSHOT_BEGIN, SNAPSHOT_CHUNK, SNAPSHOT_COMMIT,
+        )
+    }
+
+    /** Device-originated tracks only; missing/pruned records are ignored by firmware. */
+    fun trackNameFrames(
+        revision: Int,
+        tracks: List<TrackPoint>,
+        chunkPayload: Int = 14,
+    ): List<ByteArray> {
+        val updates = tracks.asSequence().mapNotNull { track ->
+            val match = DEVICE_REQUEST.matchEntire(track.requestId) ?: return@mapNotNull null
+            val request = match.groupValues[1].toIntOrNull()?.takeIf { it in 1..0xffff }
+                ?: return@mapNotNull null
+            val name = sanitizeTrackName(track.name)
+            if (name.isEmpty() || track.time < 1_577_836_800_000L) return@mapNotNull null
+            Triple(request, track.time / 1000L, name)
+        }.distinctBy { it.first to it.second }.take(32).toList()
+        if (updates.isEmpty()) return emptyList()
+        val payload = ByteArrayOutputStream().apply {
+            write(updates.size)
+            updates.forEach { (request, timestamp, name) ->
+                val bytes = name.toByteArray(Charsets.UTF_8)
+                write(request and 0xff); write((request ushr 8) and 0xff)
+                repeat(4) { shift -> write((timestamp ushr (shift * 8)).toInt() and 0xff) }
+                write(bytes.size); write(bytes)
+            }
+        }.toByteArray()
+        return transferFrames(
+            revision, payload, chunkPayload,
+            TRACK_NAMES_BEGIN, TRACK_NAMES_CHUNK, TRACK_NAMES_COMMIT,
+        )
+    }
+
+    private fun transferFrames(
+        revision: Int,
+        payload: ByteArray,
+        chunkPayload: Int,
+        beginOpcode: Int,
+        chunkOpcode: Int,
+        commitOpcode: Int,
+    ): List<ByteArray> {
         require(payload.isNotEmpty() && payload.size <= 12000 && chunkPayload in 1..238)
         val out = mutableListOf<ByteArray>()
         val crc = CRC32().apply { update(payload) }.value.toInt()
-        out += ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN).put(VERSION.toByte()).put(SNAPSHOT_BEGIN.toByte())
+        out += ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN).put(VERSION.toByte()).put(beginOpcode.toByte())
             .putShort(revision.toShort()).putShort(payload.size.toShort()).putInt(crc).array()
         var offset = 0
         while (offset < payload.size) {
             val length = minOf(chunkPayload, payload.size - offset)
-            out += ByteBuffer.allocate(6 + length).order(ByteOrder.LITTLE_ENDIAN).put(VERSION.toByte()).put(SNAPSHOT_CHUNK.toByte())
+            out += ByteBuffer.allocate(6 + length).order(ByteOrder.LITTLE_ENDIAN).put(VERSION.toByte()).put(chunkOpcode.toByte())
                 .putShort(revision.toShort()).putShort(offset.toShort()).put(payload, offset, length).array()
             offset += length
         }
-        out += ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).put(VERSION.toByte()).put(SNAPSHOT_COMMIT.toByte())
+        out += ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).put(VERSION.toByte()).put(commitOpcode.toByte())
             .putShort(revision.toShort()).array()
         return out
     }
@@ -153,6 +209,27 @@ internal object PassportProtocol {
         val data = value.toByteArray(Charsets.UTF_8); require(data.size <= max)
         out.write(data.size); out.write(data)
     }
+
+    private fun sanitizeTrackName(value: String): String {
+        val flattened = buildString {
+            value.forEach { character ->
+                append(if (character.isISOControl()) ' ' else character)
+            }
+        }.trim().replace(Regex("\\s+"), " ")
+        val out = StringBuilder()
+        var bytes = 0
+        flattened.codePoints().forEach { codePoint ->
+            val part = String(Character.toChars(codePoint))
+            val size = part.toByteArray(Charsets.UTF_8).size
+            if (bytes + size <= 47) {
+                out.append(part)
+                bytes += size
+            }
+        }
+        return out.toString().trim()
+    }
+
+    private val DEVICE_REQUEST = Regex("^device-(\\d{1,5})-.*$")
 }
 
 /** Reassembles ATT-sized check-in commands and discards stale or inconsistent fragments. */

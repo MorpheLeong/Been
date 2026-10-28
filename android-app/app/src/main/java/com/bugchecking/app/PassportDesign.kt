@@ -112,6 +112,18 @@ fun trackFavoriteContentColor(tier: Int): Color = when {
     else -> Color(0xFF123B37)
 }
 
+/** Opaque map-marker colors; stronger than translucent cards so they remain legible over map tiles. */
+@Composable
+fun trackFavoriteMapColor(tier: Int): Color {
+    val safeTier = tier.coerceIn(1, 3)
+    val colors = if (isSystemInDarkTheme()) {
+        listOf(Color(0xFF70C8BC), Color(0xFF7EDFD0), Color(0xFF91F3E1))
+    } else {
+        listOf(Color(0xFF2F7D73), Color(0xFF198F80), Color(0xFF00A68F))
+    }
+    return colors[safeTier - 1]
+}
+
 private val PassportInk = Color(0xFF172A3A)
 private val RouteBlue = Color(0xFF4B69A2)
 private val CandyBlue = Color(0xFFD9E5FF)

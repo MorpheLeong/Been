@@ -9,6 +9,7 @@ import com.google.zxing.qrcode.QRCodeReader
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.ZoneId
@@ -157,6 +158,22 @@ class PrimaryPagesTest {
         assertEquals(2, segments.size)
     }
 
+    @Test fun mapClusterUsesItsHighestFavoriteTier() {
+        fun point(id: Long, tier: Int) = TrackPoint(
+            id = id,
+            requestId = "track-$id",
+            destinationId = null,
+            name = "地点$id",
+            lat = 31.0,
+            lon = 121.0,
+            time = id,
+            accuracy = 10f,
+            favoriteTier = tier,
+        )
+        assertEquals(0, clusterFavoriteTier(TrackCluster(listOf(point(1, 0)), 31.0, 121.0)))
+        assertEquals(3, clusterFavoriteTier(TrackCluster(listOf(point(1, 1), point(2, 3)), 31.0, 121.0)))
+    }
+
     @Test fun reorderHelperMovesOneStableIdWithoutDroppingItems() {
         assertEquals(listOf("b", "c", "a"), moveChecklistId(listOf("a", "b", "c"), "a", "c"))
         assertEquals(listOf("a", "b", "c"), moveChecklistId(listOf("a", "b", "c"), "x", "c"))
@@ -232,5 +249,121 @@ class PrimaryPagesTest {
             pan = Offset.Zero,
         )
         assertEquals(Offset(-100f, -40f), next)
+    }
+
+    @Test fun backupCatchUpRunsWhenMissingOrDailyIntervalElapsed() {
+        val now = 10L * BACKUP_INTERVAL_MILLIS
+        assertEquals(true, isBackupOverdue(0L, now))
+        assertEquals(false, isBackupOverdue(now - BACKUP_INTERVAL_MILLIS + 1L, now))
+        assertEquals(true, isBackupOverdue(now - BACKUP_INTERVAL_MILLIS, now))
+    }
+
+    @Test fun automaticBackupChoosesDailyBeforePendingChange() {
+        val now = 10L * BACKUP_INTERVAL_MILLIS
+        assertEquals(
+            BackupKind.DAILY,
+            automaticBackupKind(8, 7, now - BACKUP_INTERVAL_MILLIS, now),
+        )
+        assertEquals(BackupKind.LATEST, automaticBackupKind(8, 7, now, now))
+        assertNull(automaticBackupKind(8, 8, now, now))
+        assertEquals(BackupReason.DATA_CHANGE, defaultBackupReason(BackupKind.LATEST))
+        assertEquals(BackupReason.DAILY_SCHEDULE, defaultBackupReason(BackupKind.DAILY))
+    }
+
+    @Test fun backupTrackingCoversEveryMutableDataTable() {
+        val statements = backupTrackingTriggerStatements()
+        assertEquals(18, statements.size)
+        listOf("tracks", "places", "destinations", "qrs", "profile", "device_settings").forEach { table ->
+            listOf("INSERT", "UPDATE", "DELETE").forEach { action ->
+                assertEquals(1, statements.count { "AFTER $action ON $table" in it })
+            }
+        }
+    }
+
+    @Test fun placeMatchingPrefersStableIdentityAndRejectsAmbiguousNames() {
+        fun place(id: String, name: String, lat: Double = 31.0, lon: Double = 121.0) = SavedPlace(
+            id = id,
+            name = name,
+            favoriteTier = 2,
+            provider = PlaceProvider.AMAP,
+            providerPlaceId = if (id == "stable") "B001" else null,
+            canonicalUrl = if (id == "url") "https://uri.amap.com/marker?poiid=B002" else null,
+            latitude = lat,
+            longitude = lon,
+            createdAt = 1,
+            updatedAt = 1,
+        )
+        val stable = place("stable", "旧名称")
+        val byId = TrackPoint(
+            1, "track-1", null, "完全不同的名称", 0.0, 0.0, 1, 10f,
+            provider = PlaceProvider.AMAP,
+            placeId = "B001",
+        )
+        assertEquals("stable", findSavedPlaceMatch(byId, listOf(stable))?.place?.id)
+        assertEquals(PlaceMatchConfidence.EXACT_IDENTIFIER, findSavedPlaceMatch(byId, listOf(stable))?.confidence)
+
+        val byUrl = TrackPoint(
+            2, "track-2", null, "其他名称", 0.0, 0.0, 1, 10f,
+            canonicalUrl = "https://uri.amap.com/marker?poiid=B002#ignored",
+        )
+        assertEquals("url", findSavedPlaceMatch(byUrl, listOf(place("url", "链接地点")))?.place?.id)
+
+        val byName = TrackPoint(3, "track-3", null, "同名餐厅", 31.0001, 121.0001, 1, 20f)
+        assertEquals("near", findSavedPlaceMatch(byName, listOf(place("near", "同名餐厅")))?.place?.id)
+        assertNull(findSavedPlaceMatch(byName, listOf(place("near", "同名餐厅"), place("also", "同名餐厅", 31.0002, 121.0002))))
+    }
+
+    @Test fun placeLibrarySearchesNameAndMapIdentity() {
+        val places = listOf(
+            SavedPlace("a", "青禾餐厅", 1, PlaceProvider.AMAP, canonicalUrl = "https://amap.com/a",
+                latitude = 31.0, longitude = 121.0, createdAt = 1, updatedAt = 1, lastVisitedAt = 5),
+            SavedPlace("b", "咖啡馆", 3, PlaceProvider.GOOGLE, providerPlaceId = "coffee-id",
+                latitude = 31.1, longitude = 121.1, createdAt = 1, updatedAt = 1, lastVisitedAt = 8),
+        )
+        assertEquals(listOf("a"), filterSavedPlaces(places, setOf(1, 2, 3), "青禾").map(SavedPlace::id))
+        assertEquals(listOf("b"), filterSavedPlaces(places, setOf(3), "coffee-id").map(SavedPlace::id))
+        assertEquals(emptyList<String>(), filterSavedPlaces(places, emptySet(), "").map(SavedPlace::id))
+    }
+
+    @Test fun dailyRetentionNeverDeletesLayeredOrManualBackups() {
+        val daily = (1..32).map { index ->
+            BackupFileRecord("daily-$index", "BugChecking-daily-$index.bugchecking.zip", index.toLong())
+        }
+        val files = daily + listOf(
+            BackupFileRecord("latest", "BugChecking-latest.bugchecking.zip", 1),
+            BackupFileRecord("previous", "BugChecking-previous.bugchecking.zip", 1),
+            BackupFileRecord("manual", "BugChecking-manual-1.bugchecking.zip", 1),
+            BackupFileRecord("milestone", "BugChecking-milestone-before-restore-1.bugchecking.zip", 1),
+        )
+        assertEquals(
+            listOf("daily-2", "daily-1"),
+            backupsToPrune(files, "BugChecking-daily-", 30).map { it.id },
+        )
+    }
+
+    @Test fun archiveChecksumCoversManifestAndAvatar() {
+        val manifest = "manifest".toByteArray()
+        val checksum = archiveChecksum(manifest, null)
+        assertEquals(checksum, archiveChecksum(manifest, null))
+        assertTrue(checksum.matches(Regex("[0-9a-f]{64}")))
+        assertTrue(archiveChecksum(manifest, null) != archiveChecksum(manifest, "avatar".toByteArray()))
+        assertTrue(archiveChecksum(manifest, null) != archiveChecksum("changed".toByteArray(), null))
+    }
+
+    @Test fun backupValidationRejectsDanglingQrAndInvalidFavoriteTier() {
+        fun snapshot(destinationQrId: String?, favoriteTier: Int) = PassportBackupSnapshot(
+            profile = PassportProfile("机主", "简介", listOf("account")),
+            soundVolume = 50,
+            screenTimeoutSeconds = 60,
+            destinations = listOf(Destination("destination", "地点", 0, false, destinationQrId)),
+            qrs = listOf(PassportQr("qr", "凭证", "payload", false, createdOrder = 1)),
+            tracks = listOf(
+                TrackPoint(1, "track", null, "地点", 31.0, 121.0, 1L, 10f, favoriteTier = favoriteTier),
+            ),
+        )
+
+        snapshot("qr", 3).requireValid()
+        assertThrows(IllegalArgumentException::class.java) { snapshot("missing", 3).requireValid() }
+        assertThrows(IllegalArgumentException::class.java) { snapshot("qr", 4).requireValid() }
     }
 }
