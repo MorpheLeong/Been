@@ -1,26 +1,45 @@
 package com.bugchecking.app
 
+import android.os.Build
+import android.view.RoundedCorner
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,14 +57,30 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -61,6 +96,143 @@ object PassportSpacing {
     val minTouchTarget: Dp = 48.dp
     val formMaxWidth: Dp = 720.dp
     val listMaxWidth: Dp = 840.dp
+}
+
+@Immutable
+data class PassportPalette(
+    val light: androidx.compose.material3.ColorScheme,
+    val dark: androidx.compose.material3.ColorScheme,
+    val neonGreen: Color = PassportNeonGreen,
+    val onNeonGreen: Color = PassportOnNeonGreen,
+    val disconnectedGreen: Color = PassportDisconnectedGreen,
+    val mediaBackdrop: Color = Color.Black,
+    val qrBackground: Color = Color.White,
+    val qrForeground: Color = Color.Black,
+)
+
+@Immutable
+data class PassportShapeTokens(
+    val screenCornerRadius: Dp,
+    val floatingEdgeInset: Dp = PassportSpacing.md,
+    val floatingNavigationHeight: Dp = 64.dp,
+) {
+    val cardCornerRadius: Dp = screenCornerRadius
+    val fieldCornerRadius: Dp = 16.dp
+    val buttonCornerRadius: Dp = 24.dp
+    val floatingNavigationCornerRadius: Dp = concentricCornerRadius(
+        screenCornerRadius = screenCornerRadius,
+        edgeInset = floatingEdgeInset,
+        containerHeight = floatingNavigationHeight,
+    )
+    val cardShape = RoundedCornerShape(cardCornerRadius)
+    val fieldShape = RoundedCornerShape(fieldCornerRadius)
+    val buttonShape = RoundedCornerShape(buttonCornerRadius)
+    val floatingNavigationShape = RoundedCornerShape(floatingNavigationCornerRadius)
+    val circular = CircleShape
+    val full = RoundedCornerShape(percent = 50)
+    val navigationSelectionShape = full
+}
+
+internal fun concentricCornerRadius(
+    screenCornerRadius: Dp,
+    edgeInset: Dp,
+    containerHeight: Dp,
+    minimumRadius: Dp = 16.dp,
+): Dp = (screenCornerRadius - edgeInset).coerceIn(
+    minimumValue = minimumRadius,
+    maximumValue = containerHeight / 2,
+)
+
+@Immutable
+data class PassportContentTokens(
+    val screenCornerRadius: Dp,
+) {
+    val cardHorizontalPadding: Dp = maxOf(PassportSpacing.lg, screenCornerRadius / 2)
+    val cardVerticalPadding: Dp = PassportSpacing.lg
+    val compactCardVerticalPadding: Dp = PassportSpacing.md
+}
+
+@Immutable
+data class PassportBorderTokens(
+    val standard: Dp = 1.dp,
+    val focused: Dp = 2.dp,
+    val selected: Dp = 2.dp,
+    val floating: Dp = 1.dp,
+)
+
+@Immutable
+data class PassportComponentTokens(
+    val primaryNavigationHeight: Dp = 64.dp,
+    val cornerActionSize: Dp = 48.dp,
+    val floatingHorizontalInset: Dp = PassportSpacing.md,
+    val compactNavigationHeight: Dp = 64.dp,
+    val compactFabSize: Dp = 64.dp,
+    val compactNavigationGap: Dp = 8.dp,
+    val compactNavigationBottomGap: Dp = 12.dp,
+    val compactNavigationContentPadding: Dp = 4.dp,
+    val compactNavigationItemHeight: Dp = 56.dp,
+    val compactNavigationIconSize: Dp = 24.dp,
+    val compactNavigationLabelGap: Dp = 2.dp,
+    val signatureContainerHorizontalPadding: Dp = 4.dp,
+    val trackToolRowMinHeight: Dp = 64.dp,
+    val overlaySafeGap: Dp = 8.dp,
+    val floatingControlShadowElevation: Dp = 4.dp,
+    val floatingNavigationShadowElevation: Dp = 4.dp,
+    val floatingFabDefaultElevation: Dp = 6.dp,
+    val floatingFabPressedElevation: Dp = 8.dp,
+)
+
+@Immutable
+data class PassportDesignTokens(
+    val palette: PassportPalette,
+    val shapes: PassportShapeTokens,
+    val content: PassportContentTokens,
+    val borders: PassportBorderTokens = PassportBorderTokens(),
+    val components: PassportComponentTokens = PassportComponentTokens(),
+)
+
+private val LocalPassportDesignTokens = compositionLocalOf<PassportDesignTokens> {
+    error("PassportDesignTokens are unavailable outside PassportTheme")
+}
+
+val PassportTokens: PassportDesignTokens
+    @Composable get() = LocalPassportDesignTokens.current
+
+internal fun uniformScreenCornerRadiusPx(
+    apiLevel: Int,
+    cornerRadiiPx: List<Int?>,
+    fallbackPx: Int,
+): Int {
+    if (apiLevel < Build.VERSION_CODES.S) return fallbackPx
+    val available = cornerRadiiPx.filterNotNull().filter { it > 0 }
+    return if (available.isEmpty()) 0 else available.min()
+}
+
+@Composable
+private fun rememberScreenCornerRadius(): Dp {
+    val view = LocalView.current
+    val density = LocalDensity.current
+    val fallbackPx = with(density) { 16.dp.roundToPx() }
+    var radiusPx by remember(view) { mutableIntStateOf(fallbackPx) }
+    LaunchedEffect(view, density) {
+        withFrameNanos { }
+        val insets = view.rootWindowInsets
+        radiusPx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && insets != null) {
+            uniformScreenCornerRadiusPx(
+                apiLevel = Build.VERSION.SDK_INT,
+                cornerRadiiPx = listOf(
+                    insets.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)?.radius,
+                    insets.getRoundedCorner(RoundedCorner.POSITION_TOP_RIGHT)?.radius,
+                    insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_RIGHT)?.radius,
+                    insets.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT)?.radius,
+                ),
+                fallbackPx = fallbackPx,
+            )
+        } else {
+            uniformScreenCornerRadiusPx(Build.VERSION.SDK_INT, emptyList(), fallbackPx)
+        }
+    }
+    return with(density) { radiusPx.toDp() }
 }
 
 /** Track-home hierarchy tokens: signature features stay visible without competing with Add. */
@@ -92,14 +264,24 @@ fun primaryPageChromeColor(): Color = MaterialTheme.colorScheme.surface.copy(
 )
 
 @Composable
-fun primaryPageNavigationColor(): Color = MaterialTheme.colorScheme.surfaceContainer.copy(
-    alpha = if (isSystemInDarkTheme()) 0.70f else 0.92f,
+fun primaryPageNavigationColor(): Color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(
+    alpha = if (isSystemInDarkTheme()) 0.74f else 0.88f,
 )
 
 @Composable
 fun primaryPageCardColor(): Color = MaterialTheme.colorScheme.surfaceContainerLow.copy(
     alpha = if (isSystemInDarkTheme()) 0.68f else 0.84f,
 )
+
+/** A quiet shared rim that keeps floating controls legible over moving map content. */
+@Composable
+fun floatingControlBorder(): BorderStroke = BorderStroke(
+    PassportTokens.borders.floating,
+    MaterialTheme.colorScheme.onSurface.copy(alpha = floatingControlBorderAlpha(isSystemInDarkTheme())),
+)
+
+internal fun floatingControlBorderAlpha(darkTheme: Boolean): Float =
+    if (darkTheme) 0.28f else 0f
 
 internal val PassportNeonGreen = Color(0xFF53FF9A)
 internal val PassportOnNeonGreen = Color(0xFF00351D)
@@ -156,7 +338,7 @@ fun trackFavoriteMapColor(tier: Int): Color {
     return favoriteTierPalette(isSystemInDarkTheme(), tier).accent
 }
 
-private val PassportLightScheme = lightColorScheme(
+internal val PassportLightScheme = lightColorScheme(
     primary = NeonGreen,
     onPrimary = OnNeonGreen,
     primaryContainer = NeonGreen,
@@ -195,7 +377,7 @@ private val PassportLightScheme = lightColorScheme(
     surfaceContainerHighest = Color(0xFFDDB6B5),
 )
 
-private val PassportDarkScheme = darkColorScheme(
+internal val PassportDarkScheme = darkColorScheme(
     primary = NeonGreen,
     onPrimary = OnNeonGreen,
     primaryContainer = NeonGreen,
@@ -245,24 +427,47 @@ private val PassportTypography = Typography().let { baseline ->
     )
 }
 
-private val PassportShapes = Shapes(
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp),
-)
-
 @Composable
 fun PassportTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    palette: PassportPalette = PassportPalette(PassportLightScheme, PassportDarkScheme),
     content: @Composable () -> Unit,
 ) {
-    MaterialTheme(
-        colorScheme = passportColorScheme(darkTheme),
-        typography = PassportTypography,
-        shapes = PassportShapes,
-        content = content,
-    )
+    val screenCornerRadius = rememberScreenCornerRadius()
+    val componentTokens = remember { PassportComponentTokens() }
+    val shapeTokens = remember(screenCornerRadius, componentTokens) {
+        PassportShapeTokens(
+            screenCornerRadius = screenCornerRadius,
+            floatingEdgeInset = componentTokens.floatingHorizontalInset,
+            floatingNavigationHeight = componentTokens.primaryNavigationHeight,
+        )
+    }
+    val shapes = remember(shapeTokens) {
+        Shapes(
+            extraSmall = shapeTokens.fieldShape,
+            small = shapeTokens.fieldShape,
+            medium = shapeTokens.buttonShape,
+            large = shapeTokens.cardShape,
+            extraLarge = shapeTokens.cardShape,
+        )
+    }
+    val contentTokens = remember(screenCornerRadius) { PassportContentTokens(screenCornerRadius) }
+    val tokens = remember(palette, shapeTokens, contentTokens, componentTokens) {
+        PassportDesignTokens(
+            palette = palette,
+            shapes = shapeTokens,
+            content = contentTokens,
+            components = componentTokens,
+        )
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalPassportDesignTokens provides tokens) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) palette.dark else palette.light,
+            typography = PassportTypography,
+            shapes = shapes,
+            content = content,
+        )
+    }
 }
 
 /** Clears focus only for an unhandled tap; scrolling and child controls keep their active editor. */
@@ -277,6 +482,80 @@ fun Modifier.clearFocusOnTapOutside(): Modifier = composed {
                 focusManager.clearFocus()
                 keyboard?.hide()
             }
+        }
+    }
+}
+
+@Composable
+fun PassportCornerAction(
+    onClick: () -> Unit,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    icon: @Composable () -> Unit,
+) {
+    val tokens = PassportTokens
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(tokens.components.cornerActionSize)
+            .alpha(if (enabled) 1f else 0.38f)
+            .semantics {
+            this.contentDescription = contentDescription
+        },
+        shape = tokens.shapes.circular,
+        color = containerColor,
+        contentColor = contentColor,
+        tonalElevation = 1.dp,
+        shadowElevation = tokens.components.floatingControlShadowElevation,
+        border = floatingControlBorder(),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(24.dp)) { icon() }
+        }
+    }
+}
+
+@Composable
+fun PassportCornerScaffold(
+    modifier: Modifier = Modifier,
+    topStart: (@Composable () -> Unit)? = null,
+    topEnd: (@Composable () -> Unit)? = null,
+    bottomStart: (@Composable () -> Unit)? = null,
+    bottomEnd: (@Composable () -> Unit)? = null,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    val tokens = PassportTokens
+    val edgeInset = tokens.components.floatingHorizontalInset
+    val safe = WindowInsets.safeDrawing.asPaddingValues()
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val bottomInset = if (imeBottom > safe.calculateBottomPadding()) imeBottom else safe.calculateBottomPadding()
+    val topReserve = safe.calculateTopPadding() + tokens.components.overlaySafeGap +
+        tokens.components.cornerActionSize + PassportSpacing.md
+    val bottomReserve = bottomInset + tokens.components.overlaySafeGap +
+        tokens.components.cornerActionSize + PassportSpacing.md
+
+    Box(modifier.fillMaxSize().clearFocusOnTapOutside()) {
+        content(PaddingValues(top = topReserve, bottom = bottomReserve))
+        if (topStart != null || topEnd != null) Row(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(top = tokens.components.overlaySafeGap, start = edgeInset, end = edgeInset),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            if (topStart != null) topStart() else Spacer(Modifier.size(tokens.components.cornerActionSize))
+            if (topEnd != null) topEnd() else Spacer(Modifier.size(tokens.components.cornerActionSize))
+        }
+        if (bottomStart != null || bottomEnd != null) Row(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().imePadding()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                .padding(bottom = tokens.components.overlaySafeGap, start = edgeInset, end = edgeInset),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            if (bottomStart != null) bottomStart() else Spacer(Modifier.size(tokens.components.cornerActionSize))
+            if (bottomEnd != null) bottomEnd() else Spacer(Modifier.size(tokens.components.cornerActionSize))
         }
     }
 }
@@ -314,38 +593,38 @@ fun PassportPageScaffold(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    actions: @Composable RowScope.() -> Unit = {},
+    actions: (@Composable RowScope.() -> Unit)? = null,
     primaryActionLabel: String? = null,
+    primaryActionIcon: ImageVector = Icons.Default.Check,
     primaryActionEnabled: Boolean = true,
+    primaryActionLoading: Boolean = false,
     onPrimaryAction: (() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    Scaffold(
-        modifier = modifier.clearFocusOnTapOutside(),
-        topBar = {
-            TopAppBar(
-                title = { Text(title, maxLines = 1) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = actions,
-            )
-        },
-        bottomBar = {
-            if (primaryActionLabel != null && onPrimaryAction != null) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
-                ) {
-                    Button(
-                        onClick = onPrimaryAction,
-                        enabled = primaryActionEnabled,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = PassportSpacing.md, vertical = PassportSpacing.sm),
-                    ) { Text(primaryActionLabel) }
-                }
+    @Suppress("UNUSED_VARIABLE") val pageTitle = title
+    PassportCornerScaffold(
+        modifier = modifier,
+        topStart = {
+            PassportCornerAction(onClick = onBack, contentDescription = "返回") {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
             }
         },
+        topEnd = actions?.let { actionContent -> { Row { actionContent() } } },
+        bottomStart = if (primaryActionLabel != null && onPrimaryAction != null) {
+            {
+            PassportCornerAction(
+                onClick = onPrimaryAction,
+                enabled = primaryActionEnabled,
+                contentDescription = primaryActionLabel,
+            ) {
+                if (primaryActionLoading) CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ) else Icon(primaryActionIcon, contentDescription = null)
+            }
+            }
+        } else null,
         content = content,
     )
 }
@@ -362,9 +641,13 @@ fun ConfirmDeleteDialog(
         title = { Text(title) },
         text = { Text(description) },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onConfirm, shape = PassportTokens.shapes.buttonShape) {
+                Text("删除", color = MaterialTheme.colorScheme.error)
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss, shape = PassportTokens.shapes.buttonShape) { Text("取消") }
+        },
     )
 }
 
@@ -408,7 +691,7 @@ private fun MapProviderChoice(
 ) {
     Surface(
         onClick = onClick,
-        shape = MaterialTheme.shapes.medium,
+        shape = PassportTokens.shapes.cardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -416,7 +699,7 @@ private fun MapProviderChoice(
             headlineContent = { Text(title) },
             leadingContent = {
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
+                    shape = PassportTokens.shapes.buttonShape,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 ) {
@@ -451,7 +734,14 @@ private fun PassportDesignPreview() {
             primaryActionLabel = "保存地点名称",
             onPrimaryAction = {},
         ) { padding ->
-            Column(Modifier.padding(padding).padding(PassportSpacing.md)) {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(
+                    start = PassportSpacing.md,
+                    end = PassportSpacing.md,
+                    top = padding.calculateTopPadding() + PassportSpacing.md,
+                    bottom = padding.calculateBottomPadding() + PassportSpacing.md,
+                ),
+            ) {
                 Text("栗Cafe（长宁馥邦苑店）", style = MaterialTheme.typography.titleMedium)
                 Text("距打卡位置 42 m", style = MaterialTheme.typography.bodySmall)
             }

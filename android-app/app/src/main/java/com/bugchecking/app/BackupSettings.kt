@@ -87,13 +87,14 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
 
     Text("数据备份", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     Card(
+        shape = PassportTokens.shapes.cardShape,
         colors = CardDefaults.cardColors(
             containerColor = primaryPageCardColor(),
             contentColor = MaterialTheme.colorScheme.onSurface,
         ),
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(16.dp),
+            Modifier.fillMaxWidth().padding(PassportTokens.content.cardHorizontalPadding),
             verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
         ) {
             Text(
@@ -117,6 +118,7 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
                 TextButton(
                     onClick = { folderPicker.launch(null) },
                     enabled = !busy,
+                    shape = PassportTokens.shapes.buttonShape,
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                 ) {
                     Text(if (preferences.folderUri == null) "选择" else "更改")
@@ -198,6 +200,7 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
                     },
                     enabled = preferences.folderUri != null && !busy,
                     modifier = Modifier.weight(1f),
+                    shape = PassportTokens.shapes.buttonShape,
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -207,6 +210,7 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
                     onClick = { importPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
+                    shape = PassportTokens.shapes.buttonShape,
                 ) { Text("导入备份") }
             }
         }
@@ -230,6 +234,7 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
             confirmButton = {
                 TextButton(
                     enabled = !busy,
+                    shape = PassportTokens.shapes.buttonShape,
                     onClick = {
                         scope.launch {
                             busy = true
@@ -248,7 +253,11 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
                 ) { Text(if (busy) "正在导入…" else "替换并导入") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingImport = null }, enabled = !busy) { Text("取消") }
+                TextButton(
+                    onClick = { pendingImport = null },
+                    enabled = !busy,
+                    shape = PassportTokens.shapes.buttonShape,
+                ) { Text("取消") }
             },
         )
     }

@@ -47,6 +47,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberOverscrollEffect
@@ -82,6 +83,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -91,7 +93,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -101,6 +102,9 @@ import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -127,6 +131,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -135,8 +140,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
@@ -550,11 +553,8 @@ private fun PassportApp(
                 onOpenProfile = ::openProfile,
                 onOpenMap = { navController.navigate(Routes.TrackMap) },
                 onOpenFavorites = { navController.navigate(Routes.TrackFavorites) },
-                floatingActionButton = {
-                    FloatingActionButton(onClick = { navController.navigate(Routes.TrackCreate) }) {
-                        Icon(Icons.Default.Add, contentDescription = "手动添加轨迹")
-                    }
-                },
+                onAdd = { navController.navigate(Routes.TrackCreate) },
+                addContentDescription = "手动添加轨迹",
             ) { topContentPadding ->
                 TracksPage(
                     rows = remember(tracks, trackFocusTarget) {
@@ -584,11 +584,8 @@ private fun PassportApp(
                 if (bleConnected) sync else connect,
                 profileAvatarPath = profile.avatarPath,
                 onOpenProfile = ::openProfile,
-                floatingActionButton = {
-                    FloatingActionButton(onClick = { navController.navigate(Routes.ChecklistImport) }) {
-                        Icon(Icons.Default.Add, contentDescription = "添加到清单")
-                    }
-                },
+                onAdd = { navController.navigate(Routes.ChecklistImport) },
+                addContentDescription = "添加到清单",
             ) { topContentPadding ->
                 ChecklistPage(db, destinations, refresh, topContentPadding)
             }
@@ -603,11 +600,8 @@ private fun PassportApp(
                 if (bleConnected) sync else connect,
                 profileAvatarPath = profile.avatarPath,
                 onOpenProfile = ::openProfile,
-                floatingActionButton = {
-                    FloatingActionButton(onClick = { navController.navigate("${Routes.QrEdit}/new") }) {
-                        Icon(Icons.Default.Add, contentDescription = "添加二维码")
-                    }
-                },
+                onAdd = { navController.navigate("${Routes.QrEdit}/new") },
+                addContentDescription = "添加二维码",
             ) { topContentPadding ->
                 QrPage(
                     db = db,
@@ -840,7 +834,7 @@ private fun PassportApp(
                             initialMapLink = sharedText
                             pendingMapShare = null
                             navController.navigate("${Routes.TrackEdit}/${track.id}")
-                        }, modifier = Modifier.fillMaxWidth()) {
+                        }, modifier = Modifier.fillMaxWidth(), shape = PassportTokens.shapes.buttonShape) {
                             Column(Modifier.fillMaxWidth()) {
                                 Text(track.name, fontWeight = FontWeight.Medium)
                                 Text(formatTrackDate(track), style = MaterialTheme.typography.bodySmall)
@@ -849,7 +843,12 @@ private fun PassportApp(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { pendingMapShare = null }) { Text("取消") } },
+            confirmButton = {
+                TextButton(
+                    onClick = { pendingMapShare = null },
+                    shape = PassportTokens.shapes.buttonShape,
+                ) { Text("取消") }
+            },
         )
     }
 }
@@ -891,7 +890,8 @@ private fun PassportRootScaffold(
     onBackFromProfile: (() -> Unit)? = null,
     onOpenMap: (() -> Unit)? = null,
     onOpenFavorites: (() -> Unit)? = null,
-    floatingActionButton: @Composable () -> Unit = {},
+    onAdd: (() -> Unit)? = null,
+    addContentDescription: String = "添加",
     content: @Composable (topContentPadding: Dp) -> Unit,
 ) {
     Box(Modifier.fillMaxSize().clearFocusOnTapOutside()) {
@@ -911,41 +911,28 @@ private fun PassportRootScaffold(
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 val safeTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
-                val topContentPadding = safeTop + PrimaryTopActionTokens.safeAreaGap +
-                    PrimaryTopActionTokens.targetSize + if (tab == Tab.Me) {
-                    PrimaryTopActionTokens.detailContentGap
-                } else {
-                    PrimaryTopActionTokens.primaryContentBreathingRoom
+                val actionViewportTop = safeTop + PrimaryTopActionTokens.safeAreaGap +
+                    PrimaryTopActionTokens.targetSize + PrimaryTopActionTokens.detailContentGap
+                val firstContentPadding = if (tab == Tab.Me) 0.dp else {
+                    PrimaryTopActionTokens.primaryContentBreathingRoom - PrimaryTopActionTokens.detailContentGap
                 }
+                val designTokens = PassportTokens
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    bottomBar = {
-                        if (compact && tab != Tab.Me) NavigationBar(
-                            containerColor = primaryPageNavigationColor(),
-                        ) {
-                            primaryNavigationTabs.forEach { item ->
-                                NavigationBarItem(
-                                    selected = tab == item,
-                                    onClick = { onTabSelected(item) },
-                                    icon = { Icon(item.icon, contentDescription = null) },
-                                    label = { Text(item.label) },
-                                )
-                            }
-                        }
-                    },
-                    floatingActionButton = floatingActionButton,
                 ) { padding ->
-                    Box(Modifier.fillMaxSize().padding(padding)) {
+                    Box(
+                        Modifier.fillMaxSize().padding(padding),
+                    ) {
                         Column(
                             Modifier.widthIn(max = PassportSpacing.listMaxWidth).fillMaxSize()
                                 .align(Alignment.TopCenter)
                                 .padding(horizontal = if (compact) PassportSpacing.md else PassportSpacing.lg)
                                 .clipToBounds(),
                         ) {
-                            content(topContentPadding)
+                            content(actionViewportTop + firstContentPadding)
                         }
                     }
                 }
@@ -962,7 +949,92 @@ private fun PassportRootScaffold(
                     onDeviceAction = onDeviceAction,
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
+                if (compact && tab != Tab.Me) {
+                    val edgeInset = designTokens.components.floatingHorizontalInset
+                    Row(
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                            .padding(start = edgeInset, end = edgeInset, bottom = PassportSpacing.sm)
+                            .height(designTokens.components.primaryNavigationHeight),
+                        horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            shape = designTokens.shapes.floatingNavigationShape,
+                            color = primaryPageNavigationColor(),
+                            tonalElevation = 1.dp,
+                            shadowElevation = designTokens.components.floatingNavigationShadowElevation,
+                            border = floatingControlBorder(),
+                        ) {
+                            Row(
+                                Modifier.fillMaxSize().padding(designTokens.components.compactNavigationContentPadding),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                primaryNavigationTabs.forEach { item ->
+                                    PassportCompactNavigationItem(
+                                        item = item,
+                                        modifier = Modifier.weight(1f),
+                                        selected = tab == item,
+                                        onClick = { onTabSelected(item) },
+                                    )
+                                }
+                            }
+                        }
+                        if (onAdd != null) FloatingActionButton(
+                            onClick = onAdd,
+                            modifier = Modifier.size(designTokens.components.primaryNavigationHeight)
+                                .border(floatingControlBorder(), CircleShape),
+                            shape = CircleShape,
+                            elevation = FloatingActionButtonDefaults.elevation(
+                                defaultElevation = designTokens.components.floatingFabDefaultElevation,
+                                pressedElevation = designTokens.components.floatingFabPressedElevation,
+                                focusedElevation = designTokens.components.floatingFabPressedElevation,
+                                hoveredElevation = designTokens.components.floatingFabPressedElevation,
+                            ),
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = addContentDescription)
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun PassportCompactNavigationItem(
+    item: Tab,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = PassportTokens
+    Surface(
+        modifier = modifier.height(tokens.components.compactNavigationItemHeight),
+        shape = tokens.shapes.navigationSelectionShape,
+        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        Column(
+            Modifier.fillMaxSize()
+                .selectable(selected = selected, onClick = onClick, role = Role.Tab)
+                .semantics(mergeDescendants = true) { contentDescription = item.label },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                item.icon,
+                contentDescription = null,
+                modifier = Modifier.size(tokens.components.compactNavigationIconSize),
+            )
+            Spacer(Modifier.height(tokens.components.compactNavigationLabelGap))
+            Text(
+                item.label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -981,11 +1053,14 @@ private fun PrimaryTopActions(
     onDeviceAction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val horizontalInset = if (compact) {
+        PassportTokens.components.floatingHorizontalInset
+    } else PassportSpacing.lg
     Box(
         modifier = modifier.fillMaxWidth()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
             .padding(top = PrimaryTopActionTokens.safeAreaGap)
-            .padding(horizontal = if (compact) PassportSpacing.md else PassportSpacing.lg),
+            .padding(horizontal = horizontalInset),
         contentAlignment = Alignment.TopCenter,
     ) {
         BoxWithConstraints(
@@ -1044,6 +1119,8 @@ private fun PrimaryBackAction(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 1.dp,
+        shadowElevation = PassportTokens.components.floatingControlShadowElevation,
+        border = floatingControlBorder(),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -1066,6 +1143,8 @@ private fun ProfileAvatarAction(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 1.dp,
+        shadowElevation = PassportTokens.components.floatingControlShadowElevation,
+        border = floatingControlBorder(),
     ) {
         if (avatar != null) {
             Image(
@@ -1118,10 +1197,12 @@ private fun DeviceStatusAction(
                 else "$actionDescription，$statusMessage"
                 if (statusMessage != null) liveRegion = LiveRegionMode.Polite
             },
-        shape = CircleShape,
+        shape = PassportTokens.shapes.full,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 1.dp,
+        shadowElevation = PassportTokens.components.floatingControlShadowElevation,
+        border = floatingControlBorder(),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             AnimatedVisibility(
@@ -1211,11 +1292,17 @@ private fun ProfileSettingsPage(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("个人身份", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(colors = CardDefaults.cardColors(
-            containerColor = primaryPageCardColor(),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        )) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(
+            shape = PassportTokens.shapes.cardShape,
+            colors = CardDefaults.cardColors(
+                containerColor = primaryPageCardColor(),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(PassportTokens.content.cardHorizontalPadding),
+                verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
+            ) {
                 Column(
                     Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1223,7 +1310,7 @@ private fun ProfileSettingsPage(
                 ) {
                     Surface(
                         modifier = Modifier.size(96.dp),
-                        shape = MaterialTheme.shapes.large,
+                        shape = PassportTokens.shapes.circular,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                     ) {
                         if (avatar != null) Image(
@@ -1235,6 +1322,7 @@ private fun ProfileSettingsPage(
                     FilledTonalButton(
                         onClick = { avatarPicker.launch(arrayOf("image/*")) },
                         enabled = !avatarBusy,
+                        shape = PassportTokens.shapes.buttonShape,
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                             contentColor = MaterialTheme.colorScheme.onSurface,
@@ -1249,7 +1337,7 @@ private fun ProfileSettingsPage(
                 Button(onClick = {
                     val accounts = socialIds.lineSequence().map(String::trim).filter(String::isNotEmpty).take(4).toList()
                     onSave(PassportProfile(nickname, bio, accounts, profile.avatarPath))
-                }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(
+                }, modifier = Modifier.fillMaxWidth(), shape = PassportTokens.shapes.buttonShape, colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                 )) { Text("保存资料") }
@@ -1257,11 +1345,17 @@ private fun ProfileSettingsPage(
         }
 
         Text("设备设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(colors = CardDefaults.cardColors(
-            containerColor = primaryPageCardColor(),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        )) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(
+            shape = PassportTokens.shapes.cardShape,
+            colors = CardDefaults.cardColors(
+                containerColor = primaryPageCardColor(),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(PassportTokens.content.cardHorizontalPadding),
+                verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
+            ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("提示音量", style = MaterialTheme.typography.titleSmall)
                     Text("${volumeDraft.toInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1276,7 +1370,10 @@ private fun ProfileSettingsPage(
                 Text("0% 为静音", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("亮屏时长", style = MaterialTheme.typography.titleSmall)
                 Box {
-                    OutlinedButton(onClick = { timeoutMenuOpen = true }) {
+                    OutlinedButton(
+                        onClick = { timeoutMenuOpen = true },
+                        shape = PassportTokens.shapes.buttonShape,
+                    ) {
                         Text(if (screenTimeout < 60) "$screenTimeout 秒" else "${screenTimeout / 60} 分钟")
                     }
                     DropdownMenu(expanded = timeoutMenuOpen, onDismissRequest = { timeoutMenuOpen = false }) {
@@ -1348,25 +1445,37 @@ private fun AvatarCropScreen(
         onBack = { if (!busy) onBack() },
         primaryActionLabel = if (busy) "正在保存…" else "保存头像",
         primaryActionEnabled = !loading && source != null && viewport.width > 0 && !busy,
+        primaryActionLoading = busy,
         onPrimaryAction = ::save,
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             when {
-                loading -> CircularProgressIndicator(Modifier.padding(PassportSpacing.lg))
+                loading -> CircularProgressIndicator(
+                    Modifier.padding(top = padding.calculateTopPadding() + PassportSpacing.lg),
+                )
                 source == null -> Text(
                     error ?: "无法读取待裁切头像",
                     color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(PassportSpacing.lg),
+                    modifier = Modifier.padding(
+                        top = padding.calculateTopPadding() + PassportSpacing.lg,
+                        start = PassportSpacing.lg,
+                        end = PassportSpacing.lg,
+                    ),
                 )
                 else -> Column(
                     Modifier.fillMaxWidth().widthIn(max = PassportSpacing.formMaxWidth)
                         .verticalScroll(rememberScrollState())
-                        .padding(PassportSpacing.md),
+                        .padding(
+                            start = PassportSpacing.md,
+                            end = PassportSpacing.md,
+                            top = padding.calculateTopPadding() + PassportSpacing.md,
+                            bottom = padding.calculateBottomPadding() + PassportSpacing.md,
+                        ),
                     verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm),
                 ) {
             Box(
-                    Modifier.fillMaxWidth().aspectRatio(1f).clip(MaterialTheme.shapes.medium)
-                        .background(androidx.compose.ui.graphics.Color.Black)
+                    Modifier.fillMaxWidth().aspectRatio(1f).clip(PassportTokens.shapes.circular)
+                        .background(PassportTokens.palette.mediaBackdrop)
                         .onSizeChanged {
                             viewport = it
                             offset = AvatarImage.clampOffset(source!!, viewport, scale, offset)
@@ -1497,13 +1606,17 @@ private fun TracksPage(
                 contentPadding = PaddingValues(top = topContentPadding),
             ) {
                 Card(
+                    shape = PassportTokens.shapes.cardShape,
                     colors = CardDefaults.cardColors(
                         containerColor = primaryPageCardColor(),
                         contentColor = MaterialTheme.colorScheme.onSurface,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Column(Modifier.padding(PassportSpacing.lg), verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                    Column(
+                        Modifier.padding(PassportTokens.content.cardHorizontalPadding),
+                        verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+                    ) {
                         Icon(Icons.Default.Route, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Text("还没有轨迹记录", style = MaterialTheme.typography.titleMedium)
                         Text("完成一次打卡后，这里会按日期整理你的到访地点。", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1547,7 +1660,7 @@ private fun TracksPage(
                             }
                             Surface(
                                 modifier = Modifier.align(Alignment.Center).size(12.dp),
-                                shape = RoundedCornerShape(999.dp),
+                                shape = PassportTokens.shapes.full,
                                 color = MaterialTheme.colorScheme.tertiary,
                             ) {}
                         }
@@ -1559,7 +1672,10 @@ private fun TracksPage(
                             modifier = Modifier.weight(1f).padding(vertical = PassportSpacing.xxs),
                         ) { contentColor, _ ->
                             Column(
-                                Modifier.fillMaxWidth().padding(PassportSpacing.md),
+                                Modifier.fillMaxWidth().padding(
+                                    horizontal = PassportTokens.content.cardHorizontalPadding,
+                                    vertical = PassportTokens.content.compactCardVerticalPadding,
+                                ),
                                 verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs),
                             ) {
                                 Text(
@@ -1592,12 +1708,14 @@ private fun TrackSignatureActions(
     openFavorites: () -> Unit,
 ) {
     Surface(
-        shape = MaterialTheme.shapes.large,
+        shape = PassportTokens.shapes.full,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         tonalElevation = 1.dp,
+        shadowElevation = PassportTokens.components.floatingControlShadowElevation,
+        border = floatingControlBorder(),
     ) {
-        Row {
+        Row(Modifier.padding(horizontal = PassportTokens.components.signatureContainerHorizontalPadding)) {
             IconButton(
                 onClick = openMap,
                 modifier = Modifier.size(TrackHomeActionTokens.signatureTargetSize),
@@ -1651,21 +1769,27 @@ private fun ChecklistPage(
         state = listState,
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
-        contentPadding = PaddingValues(top = topContentPadding, bottom = 104.dp),
+        contentPadding = PaddingValues(top = topContentPadding, bottom = TrackHomeActionTokens.safeBottomReserve),
     ) {
         item(key = "checklist-progress") {
-        Card(colors = CardDefaults.cardColors(
-            containerColor = primaryPageCardColor(),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        )) {
-            Column(Modifier.fillMaxWidth().padding(PassportSpacing.md), verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+        Card(
+            shape = PassportTokens.shapes.cardShape,
+            colors = CardDefaults.cardColors(
+                containerColor = primaryPageCardColor(),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(PassportTokens.content.cardHorizontalPadding),
+                verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+            ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("完成度", style = MaterialTheme.typography.titleMedium)
                     Text("$completed / ${destinations.size}", style = MaterialTheme.typography.labelLarge)
                 }
                 LinearProgressIndicator(
                     progress = { animatedProgress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(999.dp)),
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(PassportTokens.shapes.full),
                     color = MaterialTheme.colorScheme.tertiary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 )
@@ -1731,6 +1855,7 @@ private fun ChecklistPage(
                         )
                         Card(
                             onClick = { editingDestination = destination },
+                            shape = PassportTokens.shapes.cardShape,
                             interactionSource = interactionSource,
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isDragging) {
@@ -1766,14 +1891,17 @@ private fun ChecklistPage(
                                 ),
                         ) {
                             Row(
-                                Modifier.fillMaxWidth().padding(start = PassportSpacing.xs, end = PassportSpacing.xxs, top = PassportSpacing.xs, bottom = PassportSpacing.xs),
+                                Modifier.fillMaxWidth().padding(
+                                    horizontal = PassportTokens.content.cardHorizontalPadding,
+                                    vertical = PassportTokens.content.compactCardVerticalPadding,
+                                ),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Checkbox(
                                     checked = destination.done,
                                     onCheckedChange = { db.setDestinationDone(destination.id, it); refresh() },
                                 )
-                                Column(Modifier.weight(1f).padding(horizontal = PassportSpacing.sm)) {
+                                Column(Modifier.weight(1f).padding(start = PassportSpacing.xxs)) {
                                     Text(destination.name, style = MaterialTheme.typography.titleMedium, color = contentColor)
                                     if (destination.qrId != null) Text("已绑定二维码", style = MaterialTheme.typography.bodySmall, color = contentColor)
                                 }
@@ -1815,11 +1943,17 @@ private fun QrPage(
         contentPadding = PaddingValues(top = topContentPadding),
     ) {
         QrSyncHint()
-        Card(colors = CardDefaults.cardColors(
-            containerColor = primaryPageCardColor(),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        )) {
-            Column(Modifier.fillMaxWidth().padding(PassportSpacing.lg), verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+        Card(
+            shape = PassportTokens.shapes.cardShape,
+            colors = CardDefaults.cardColors(
+                containerColor = primaryPageCardColor(),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(PassportTokens.content.cardHorizontalPadding),
+                verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
+            ) {
                 Icon(Icons.Default.QrCode2, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(36.dp))
                 Text("还没有二维码", style = MaterialTheme.typography.titleMedium)
                 Text("可保存登机牌、会员码或活动凭证，内容只保存在手机本地。", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1828,7 +1962,7 @@ private fun QrPage(
     } else AlwaysStretchLazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
-        contentPadding = PaddingValues(top = topContentPadding, bottom = 104.dp),
+        contentPadding = PaddingValues(top = topContentPadding, bottom = TrackHomeActionTokens.safeBottomReserve),
     ) {
             if (lastStarredIndex < 0) item(key = "qr-sync-hint") { QrSyncHint() }
             itemsIndexed(qrs, key = { _, qr -> qr.id }) { index, qr ->
@@ -1842,6 +1976,7 @@ private fun QrPage(
                     verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
                 ) {
                     Card(
+                        shape = PassportTokens.shapes.cardShape,
                         colors = CardDefaults.cardColors(
                             containerColor = primaryPageCardColor(),
                             contentColor = qrContentColor,
@@ -1850,10 +1985,8 @@ private fun QrPage(
                     ) {
                         Row(
                             Modifier.fillMaxWidth().padding(
-                                start = PassportSpacing.md,
-                                end = PassportSpacing.xxs,
-                                top = PassportSpacing.sm,
-                                bottom = PassportSpacing.sm,
+                                horizontal = PassportTokens.content.cardHorizontalPadding,
+                                vertical = PassportTokens.content.compactCardVerticalPadding,
                             ),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -1940,20 +2073,15 @@ private fun QrPresentScreen(qr: PassportQr, onBack: () -> Unit) {
             if (oldBrightness != null) activity.window.attributes = activity.window.attributes.apply { screenBrightness = oldBrightness }
         }
     }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(qr.name) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回二维码列表")
-                    }
-                },
-            )
+    PassportCornerScaffold(
+        topStart = {
+            PassportCornerAction(onClick = onBack, contentDescription = "返回二维码列表") {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
+            }
         },
-    ) { padding ->
+    ) { _ ->
         Column(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = PassportSpacing.lg, vertical = PassportSpacing.md),
+            Modifier.fillMaxSize().padding(horizontal = PassportSpacing.lg, vertical = PassportSpacing.md),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -1965,8 +2093,8 @@ private fun QrPresentScreen(qr: PassportQr, onBack: () -> Unit) {
                 modifier = Modifier.padding(top = PassportSpacing.xxs, bottom = PassportSpacing.lg),
             )
             Surface(
-                shape = MaterialTheme.shapes.large,
-                color = androidx.compose.ui.graphics.Color.White,
+                shape = PassportTokens.shapes.cardShape,
+                color = PassportTokens.palette.qrBackground,
                 tonalElevation = 3.dp,
                 modifier = Modifier.fillMaxWidth().widthIn(max = 520.dp).aspectRatio(1f),
             ) {
@@ -2047,18 +2175,39 @@ private fun SmartImportScreen(
     }
     val sourceScrollState = rememberScrollState()
     BackHandler(onBack = leave)
+    val previewOrImport: (() -> Unit) = confirmImport ?: { start(ImportSource.Pasted(pasted)) }
+    val canProceed = if (extraction == null) pasted.isNotBlank() && job == null else selected.isNotEmpty() && job == null
     PassportPageScaffold(
         title = "添加到清单",
         onBack = leave,
-        primaryActionLabel = if (extraction == null) null else "添加 ${selected.size} 项",
-        primaryActionEnabled = selected.isNotEmpty() && job == null,
-        onPrimaryAction = confirmImport,
+        actions = {
+            PassportCornerAction(
+                onClick = {
+                    fileLauncher.launch(arrayOf(
+                        "text/*", "image/*", "application/pdf", "application/vnd.ms-excel",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ))
+                },
+                enabled = job == null,
+                contentDescription = "选择文件",
+            ) { Icon(Icons.Default.FolderOpen, null) }
+        },
+        primaryActionLabel = if (extraction == null) "生成预览" else "添加 ${selected.size} 项",
+        primaryActionIcon = if (extraction == null) Icons.AutoMirrored.Filled.ArrowForward else Icons.Default.Check,
+        primaryActionEnabled = canProceed,
+        primaryActionLoading = job != null,
+        onPrimaryAction = previewOrImport,
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize()) {
             Column(
                 Modifier.fillMaxSize().widthIn(max = PassportSpacing.listMaxWidth).align(Alignment.TopCenter)
-                    .padding(horizontal = PassportSpacing.md)
-                    .then(if (extraction == null) Modifier.verticalScroll(sourceScrollState) else Modifier),
+                    .then(if (extraction == null) Modifier.verticalScroll(sourceScrollState) else Modifier)
+                    .padding(
+                        start = PassportSpacing.md,
+                        end = PassportSpacing.md,
+                        top = padding.calculateTopPadding(),
+                        bottom = if (extraction == null) padding.calculateBottomPadding() else 0.dp,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm),
             ) {
                 if (extraction == null) {
@@ -2069,14 +2218,6 @@ private fun SmartImportScreen(
                         modifier = Modifier.padding(top = PassportSpacing.md),
                     )
                     OutlinedTextField(pasted, { pasted = it }, label = { Text("地点或清单内容") }, minLines = 6, modifier = Modifier.fillMaxWidth())
-                    Button(onClick = { start(ImportSource.Pasted(pasted)) }, enabled = pasted.isNotBlank() && job == null,
-                        modifier = Modifier.fillMaxWidth()) { Text("生成预览") }
-                    OutlinedButton(onClick = {
-                        fileLauncher.launch(arrayOf(
-                            "text/*", "image/*", "application/pdf", "application/vnd.ms-excel",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        ))
-                    }, enabled = job == null, modifier = Modifier.fillMaxWidth()) { Text("选择文件") }
                     Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.ime))
                 } else {
                     val result = extraction!!
@@ -2098,7 +2239,10 @@ private fun SmartImportScreen(
                         )
                     }
                     if (result.tables.isNotEmpty()) Box {
-                        OutlinedButton(onClick = { columnMenuExpanded = true }) {
+                        OutlinedButton(
+                            onClick = { columnMenuExpanded = true },
+                            shape = PassportTokens.shapes.buttonShape,
+                        ) {
                             Text("导入列：${result.selectedColumn ?: "请选择"}")
                         }
                         DropdownMenu(expanded = columnMenuExpanded, onDismissRequest = { columnMenuExpanded = false }) {
@@ -2115,12 +2259,22 @@ private fun SmartImportScreen(
                     if (candidates.isEmpty()) Text("当前列没有可导入内容，请切换其他列或返回重新选择来源。")
                     LazyColumn(
                         Modifier.weight(1f),
-                        contentPadding = PaddingValues(bottom = PassportSpacing.sm),
+                        contentPadding = PaddingValues(
+                            bottom = padding.calculateBottomPadding() + PassportSpacing.sm,
+                        ),
                         verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
                     ) {
                         itemsIndexed(candidates, key = { _, item -> item.id }) { index, item ->
-                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                                Column(Modifier.fillMaxWidth().padding(horizontal = PassportSpacing.xs, vertical = PassportSpacing.xxs)) {
+                            Card(
+                                shape = PassportTokens.shapes.cardShape,
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            ) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(
+                                        horizontal = PassportTokens.content.cardHorizontalPadding,
+                                        vertical = PassportTokens.content.compactCardVerticalPadding,
+                                    ),
+                                ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Checkbox(item.id in selected, onCheckedChange = { checked ->
                                             selected = if (checked) selected + item.id else selected - item.id
@@ -2161,7 +2315,10 @@ private fun SmartImportScreen(
                 if (job != null) Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                     Text(progress.ifBlank { "正在解析…" }, Modifier.weight(1f).padding(start = PassportSpacing.xs))
-                    TextButton(onClick = { job?.cancel(); job = null; progress = "已取消" }) { Text("取消") }
+                    TextButton(
+                        onClick = { job?.cancel(); job = null; progress = "已取消" },
+                        shape = PassportTokens.shapes.buttonShape,
+                    ) { Text("取消") }
                 } else if (progress.isNotBlank() && extraction == null) Text(progress, style = MaterialTheme.typography.bodySmall)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
@@ -2187,9 +2344,11 @@ private fun DestinationDialog(
         text = { OutlinedTextField(text, { text = it }, label = { Text("目的地") }, singleLine = true) },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { confirmDelete = true }) { Text("删除", color = MaterialTheme.colorScheme.error) }
-                TextButton(onClick = onDismiss) { Text("取消") }
-                TextButton(onClick = { onSave(text) }) { Text("保存") }
+                TextButton(onClick = { confirmDelete = true }, shape = PassportTokens.shapes.buttonShape) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss, shape = PassportTokens.shapes.buttonShape) { Text("取消") }
+                TextButton(onClick = { onSave(text) }, shape = PassportTokens.shapes.buttonShape) { Text("保存") }
             }
         })
     if (confirmDelete) ConfirmDeleteDialog(
@@ -2223,12 +2382,17 @@ private fun QrEditorScreen(
         primaryActionEnabled = canSave,
         onPrimaryAction = { onSave(name, payload, starred, selectedDestinationId) },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize()) {
             Column(
                 Modifier.fillMaxWidth().widthIn(max = PassportSpacing.formMaxWidth)
                     .align(Alignment.TopCenter)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = PassportSpacing.md, vertical = PassportSpacing.md),
+                    .padding(
+                        start = PassportSpacing.md,
+                        end = PassportSpacing.md,
+                        top = padding.calculateTopPadding() + PassportSpacing.md,
+                        bottom = padding.calculateBottomPadding() + PassportSpacing.md,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
             ) {
                 OutlinedTextField(
@@ -2247,11 +2411,11 @@ private fun QrEditorScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
+                    shape = PassportTokens.shapes.cardShape,
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                 ) {
                     Row(
-                        Modifier.fillMaxWidth().padding(PassportSpacing.md),
+                        Modifier.fillMaxWidth().padding(PassportTokens.content.cardHorizontalPadding),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
@@ -2275,6 +2439,7 @@ private fun QrEditorScreen(
                         OutlinedButton(
                             onClick = { destinationMenuOpen = true },
                             modifier = Modifier.fillMaxWidth(),
+                            shape = PassportTokens.shapes.buttonShape,
                         ) {
                             Text(destinations.firstOrNull { it.id == selectedDestinationId }?.name ?: "不绑定")
                         }
@@ -2315,9 +2480,9 @@ private fun PickerField(
 ) {
     Surface(
         onClick = onClick,
-        shape = MaterialTheme.shapes.medium,
+        shape = PassportTokens.shapes.fieldShape,
         color = Color.Transparent,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(PassportTokens.borders.standard, MaterialTheme.colorScheme.outline),
         modifier = modifier.heightIn(min = 56.dp),
     ) {
         Column(
@@ -2363,9 +2528,9 @@ private fun ReadOnlyTrackField(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        shape = MaterialTheme.shapes.medium,
+        shape = PassportTokens.shapes.fieldShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(PassportTokens.borders.standard, MaterialTheme.colorScheme.outlineVariant),
         modifier = modifier.heightIn(min = 64.dp).clearAndSetSemantics {
             contentDescription = "$label，$value，只读"
         },
@@ -2411,6 +2576,7 @@ private fun TrackNearbyPlacesSection(
         if (!loading) TextButton(
             onClick = onToggle,
             enabled = editingEnabled,
+            shape = PassportTokens.shapes.buttonShape,
             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
         ) {
             Text(if (places.isNotEmpty()) if (expanded) "收起" else "展开" else idleActionLabel)
@@ -2433,7 +2599,7 @@ private fun TrackNearbyPlacesSection(
             places.forEach { candidate ->
                 val selected = name.trim() == candidate.name
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
+                    shape = PassportTokens.shapes.cardShape,
                     color = if (selected) MaterialTheme.colorScheme.secondaryContainer
                         else MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier.fillMaxWidth().selectable(
@@ -2444,7 +2610,8 @@ private fun TrackNearbyPlacesSection(
                     ),
                 ) {
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = PassportSpacing.xs),
+                        Modifier.fillMaxWidth().heightIn(min = PassportTokens.components.trackToolRowMinHeight)
+                            .padding(horizontal = PassportTokens.content.cardHorizontalPadding),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = selected, onClick = null, enabled = editingEnabled)
@@ -2474,10 +2641,10 @@ private fun TrackToolRow(
         onClick = onClick,
         enabled = enabled,
         color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = PassportTokens.components.trackToolRowMinHeight),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = PassportSpacing.xs),
+            Modifier.fillMaxWidth().padding(horizontal = PassportTokens.content.cardHorizontalPadding),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
         ) {
@@ -2502,7 +2669,7 @@ private fun TrackMapToolsSection(
     Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
     Text("地图与名称识别", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
     Surface(
-        shape = MaterialTheme.shapes.medium,
+        shape = PassportTokens.shapes.cardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column {
@@ -2530,6 +2697,7 @@ private fun TrackMapToolsSection(
                 onClick = onParseLink,
                 enabled = editingEnabled && linkText.isNotBlank() && !parsingLink,
                 modifier = Modifier.align(Alignment.End),
+                shape = PassportTokens.shapes.buttonShape,
             ) { Text(if (parsingLink) "解析中…" else "识别名称") }
         }
     }
@@ -2567,37 +2735,45 @@ private fun TrackEditorPage(
     feedback: String,
     feedbackIsError: Boolean,
 ) {
-    var moreMenuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var favoriteDialogOpen by remember { mutableStateOf(false) }
     BackHandler(onBack = onBack)
-    PassportPageScaffold(
-        title = title,
-        onBack = onBack,
-        actions = {
-            if (onDelete != null || onFavorite != null) Box {
-                IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Default.MoreVert, "更多操作") }
-                DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
-                    if (onFavorite != null) DropdownMenuItem(
-                        text = { Text("收藏这条轨迹") },
-                        leadingIcon = { Icon(Icons.Default.Star, null) },
-                        onClick = { moreMenuOpen = false; favoriteDialogOpen = true },
-                    )
-                    if (onDelete != null) DropdownMenuItem(
-                            text = { Text("删除这条轨迹", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = { moreMenuOpen = false; confirmDelete = true },
-                        )
-                }
+    @Suppress("UNUSED_VARIABLE") val legacyPageTitle = title
+    PassportCornerScaffold(
+        topStart = {
+            PassportCornerAction(onClick = onBack, contentDescription = "返回") {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
             }
         },
-        primaryActionLabel = primaryActionLabel,
-        onPrimaryAction = onSave,
+        topEnd = onFavorite?.let { {
+            PassportCornerAction(onClick = { favoriteDialogOpen = true }, contentDescription = "收藏这条轨迹") {
+                Icon(if (favoriteTier > 0) Icons.Default.Star else Icons.Default.StarBorder, null)
+            }
+        } },
+        bottomStart = if (onSave != null && primaryActionLabel != null) {
+            {
+            PassportCornerAction(onClick = onSave, contentDescription = primaryActionLabel) {
+                Icon(Icons.Default.Check, null)
+            }
+            }
+        } else null,
+        bottomEnd = onDelete?.let { {
+            PassportCornerAction(
+                onClick = { confirmDelete = true },
+                contentDescription = "删除这条轨迹",
+                contentColor = MaterialTheme.colorScheme.error,
+            ) { Icon(Icons.Default.Delete, null) }
+        } },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize()) {
             Column(
                 Modifier.fillMaxSize().widthIn(max = PassportSpacing.formMaxWidth).align(Alignment.TopCenter)
-                    .verticalScroll(rememberScrollState()).padding(PassportSpacing.md),
+                    .verticalScroll(rememberScrollState()).padding(
+                        start = PassportSpacing.md,
+                        end = PassportSpacing.md,
+                        top = padding.calculateTopPadding() + PassportSpacing.md,
+                        bottom = padding.calculateBottomPadding() + PassportSpacing.md,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(PassportSpacing.md),
             ) {
                 TrackNameTextField(
@@ -2915,6 +3091,7 @@ private fun ManualTrackEditorScreen(
                 if (!favoriteOnly) FilledTonalButton(
                     onClick = ::requestLocationPermissionOrLocate,
                     enabled = !locating,
+                    shape = PassportTokens.shapes.buttonShape,
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -3075,8 +3252,15 @@ private fun DateWheelPickerDialog(
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { onConfirm(year, month, day.coerceIn(1, days.size)) }) { Text("确定") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(year, month, day.coerceIn(1, days.size)) },
+                shape = PassportTokens.shapes.buttonShape,
+            ) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, shape = PassportTokens.shapes.buttonShape) { Text("取消") }
+        },
     )
 }
 
@@ -3128,8 +3312,15 @@ private fun TimeWheelPickerDialog(
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { onConfirm(hour, minute, second) }) { Text("确定") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(hour, minute, second) },
+                shape = PassportTokens.shapes.buttonShape,
+            ) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, shape = PassportTokens.shapes.buttonShape) { Text("取消") }
+        },
     )
 }
 
@@ -3182,7 +3373,7 @@ private fun WheelPicker(
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth().height(itemHeight).align(Alignment.Center),
-            shape = MaterialTheme.shapes.medium,
+            shape = PassportTokens.shapes.fieldShape,
             color = MaterialTheme.colorScheme.secondaryContainer,
         ) {}
         LazyColumn(

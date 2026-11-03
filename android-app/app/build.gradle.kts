@@ -54,3 +54,40 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+val verifyPassportUiTokens = tasks.register("verifyPassportUiTokens") {
+    group = "verification"
+    description = "Reject raw UI colors, local shapes, theme-shape bypasses, and border widths outside PassportDesign.kt."
+    val uiSources = fileTree("src/main/java") {
+        include("**/*.kt")
+        exclude("**/PassportDesign.kt")
+    }
+    inputs.files(uiSources)
+    doLast {
+        val forbidden = linkedMapOf(
+            "raw color" to Regex("""Color\(0x[0-9A-Fa-f]+"""),
+            "local rounded corner" to Regex("""RoundedCornerShape\("""),
+            "theme shape bypass" to Regex("""shape\s*=\s*MaterialTheme\.shapes"""),
+            "raw border width" to Regex("""BorderStroke\(\s*\d"""),
+        )
+        val violations = buildList {
+            uiSources.files.sortedBy { it.path }.forEach { source ->
+                source.readLines().forEachIndexed { index, line ->
+                    forbidden.forEach { (name, pattern) ->
+                        if (pattern.containsMatchIn(line)) {
+                            add("${source.relativeTo(projectDir)}:${index + 1}: $name: ${line.trim()}")
+                        }
+                    }
+                }
+            }
+        }
+        check(violations.isEmpty()) {
+            "UI token guard failed. Move values into PassportDesign.kt or use PassportTokens:\n" +
+                violations.joinToString("\n")
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyPassportUiTokens)
+}

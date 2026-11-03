@@ -97,7 +97,10 @@ internal fun ClipboardMapLinkPrompt(
                 )
             },
             dismissButton = {
-                TextButton(onClick = { pendingText = null }) { Text("取消") }
+                TextButton(
+                    onClick = { pendingText = null },
+                    shape = PassportTokens.shapes.buttonShape,
+                ) { Text("取消") }
             },
             confirmButton = {
                 TextButton(
@@ -107,6 +110,7 @@ internal fun ClipboardMapLinkPrompt(
                         onRecognize(content)
                     },
                     enabled = editorText.isNotBlank(),
+                    shape = PassportTokens.shapes.buttonShape,
                 ) { Text("识别名称") }
             },
         )

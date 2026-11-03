@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CenterFocusStrong
@@ -285,32 +284,55 @@ internal fun TrackMapScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("轨迹地图") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回轨迹列表") } },
-                actions = { IconButton(onClick = ::fitAll, enabled = rows.isNotEmpty()) { Icon(Icons.Default.CenterFocusStrong, "重新定位全部点位") } },
-            )
+    PassportCornerScaffold(
+        topStart = {
+            PassportCornerAction(onClick = onBack, contentDescription = "返回轨迹列表") {
+                Icon(Icons.Default.ArrowBack, null)
+            }
         },
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        topEnd = {
+            PassportCornerAction(
+                onClick = ::fitAll,
+                enabled = rows.isNotEmpty(),
+                contentDescription = "重新定位全部点位",
+            ) { Icon(Icons.Default.CenterFocusStrong, null) }
+        },
+    ) { _ ->
+        Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
             if (rows.isEmpty()) {
-                Card(Modifier.align(Alignment.Center).padding(24.dp)) { Text("还没有轨迹记录，地图已准备好。", Modifier.padding(20.dp)) }
+                Card(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    shape = PassportTokens.shapes.cardShape,
+                ) {
+                    Text(
+                        "还没有轨迹记录，地图已准备好。",
+                        Modifier.padding(PassportTokens.content.cardHorizontalPadding),
+                    )
+                }
             }
             if (loading || error != null) {
-                Card(Modifier.align(Alignment.Center).padding(24.dp)) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Card(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    shape = PassportTokens.shapes.cardShape,
+                ) {
+                    Column(
+                        Modifier.padding(PassportTokens.content.cardHorizontalPadding),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
                         Text(error ?: "正在加载地图…")
-                        if (error != null) Button(onClick = { styleAttempt++ }) { Text("重试") }
+                        if (error != null) Button(
+                            onClick = { styleAttempt++ },
+                            shape = PassportTokens.shapes.buttonShape,
+                        ) { Text("重试") }
                     }
                 }
             }
             Surface(
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
                 contentColor = MaterialTheme.colorScheme.onSurface,
-                shape = RoundedCornerShape(8.dp),
+                shape = PassportTokens.shapes.cardShape,
                 tonalElevation = 1.dp,
                 modifier = Modifier.align(Alignment.BottomStart)
                     .windowInsetsPadding(
@@ -344,6 +366,7 @@ internal fun TrackMapScreen(
                         onLocateInTracks(track)
                     },
                     modifier = Modifier.fillMaxWidth(),
+                    shape = PassportTokens.shapes.buttonShape,
                 ) {
                     Text("在轨迹记录中定位")
                 }

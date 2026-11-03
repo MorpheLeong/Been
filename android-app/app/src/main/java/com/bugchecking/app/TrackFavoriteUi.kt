@@ -197,9 +197,10 @@ internal fun FavoriteTrackCard(
     val strokeWidth = with(density) { 2.dp.toPx() }
 
     Card(
+        shape = PassportTokens.shapes.cardShape,
         colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = contentColor),
         modifier = modifier
-            .border(2.dp, focusOutlineColor, MaterialTheme.shapes.medium)
+            .border(PassportTokens.borders.focused, focusOutlineColor, PassportTokens.shapes.cardShape)
             .semantics {
                 stateDescription = starDescription
                 customActions = actions
@@ -242,7 +243,10 @@ internal fun FavoriteTrackCard(
                 color = favoriteAccentColor,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = PassportSpacing.md, bottom = PassportSpacing.md),
+                    .padding(
+                        end = PassportTokens.content.cardHorizontalPadding,
+                        bottom = PassportTokens.content.compactCardVerticalPadding,
+                    ),
             )
         }
     }
@@ -283,8 +287,12 @@ internal fun FavoriteTierDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(selectedTier) }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = {
+            TextButton(onClick = { onSave(selectedTier) }, shape = PassportTokens.shapes.buttonShape) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, shape = PassportTokens.shapes.buttonShape) { Text("取消") }
+        },
     )
 }
 
@@ -315,80 +323,88 @@ internal fun PlaceLibraryScreen(
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
     PassportPageScaffold(title = "地点库", onBack = onBack) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).widthIn(max = PassportSpacing.listMaxWidth)
+        LazyColumn(
+            Modifier.fillMaxSize().widthIn(max = PassportSpacing.listMaxWidth)
                 .padding(horizontal = PassportSpacing.md),
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + PassportSpacing.md,
+                bottom = padding.calculateBottomPadding() + PassportSpacing.lg,
+            ),
             verticalArrangement = Arrangement.spacedBy(PassportSpacing.sm),
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth().padding(top = PassportSpacing.md),
-                singleLine = true,
-                label = { Text("搜索场所或地图链接") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-            )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
-                trackFavoriteLists.forEach { list ->
-                    val bit = 1 shl (list.tier - 1)
-                    FilterChip(
-                        selected = filterMask and bit != 0,
-                        onClick = { filterMask = filterMask xor bit },
-                        label = { Text("${list.stars} ${list.name}") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = trackFavoriteContainerColor(list.tier),
-                            selectedLabelColor = trackFavoriteContentColor(list.tier),
-                        ),
-                    )
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("搜索场所或地图链接") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                )
+            }
+            item {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(PassportSpacing.xs)) {
+                    trackFavoriteLists.forEach { list ->
+                        val bit = 1 shl (list.tier - 1)
+                        FilterChip(
+                            selected = filterMask and bit != 0,
+                            onClick = { filterMask = filterMask xor bit },
+                            label = { Text("${list.stars} ${list.name}") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = trackFavoriteContainerColor(list.tier),
+                                selectedLabelColor = trackFavoriteContentColor(list.tier),
+                            ),
+                        )
+                    }
                 }
             }
             when {
-                filterMask == 0 -> FavoriteEmptyState("请选择至少一个收藏列表")
-                places.isEmpty() -> FavoriteEmptyState("还没有收藏场所")
-                filtered.isEmpty() -> FavoriteEmptyState("没有符合条件的场所")
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = PassportSpacing.lg),
-                    verticalArrangement = Arrangement.spacedBy(PassportSpacing.xs),
-                ) {
-                    items(filtered, key = SavedPlace::id) { place ->
-                        val list = trackFavoriteList(place.favoriteTier)
-                        Card(
-                            onClick = { onOpen(place) },
-                            colors = CardDefaults.cardColors(
-                                containerColor = trackFavoriteContainerColor(place.favoriteTier),
-                                contentColor = trackFavoriteContentColor(place.favoriteTier),
+                filterMask == 0 -> item { FavoriteEmptyState("请选择至少一个收藏列表") }
+                places.isEmpty() -> item { FavoriteEmptyState("还没有收藏场所") }
+                filtered.isEmpty() -> item { FavoriteEmptyState("没有符合条件的场所") }
+                else -> items(filtered, key = SavedPlace::id) { place ->
+                    val list = trackFavoriteList(place.favoriteTier)
+                    Card(
+                        onClick = { onOpen(place) },
+                        shape = PassportTokens.shapes.cardShape,
+                        colors = CardDefaults.cardColors(
+                            containerColor = trackFavoriteContainerColor(place.favoriteTier),
+                            contentColor = trackFavoriteContentColor(place.favoriteTier),
+                        ),
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            contentDescription = "${place.name}，${list?.stars.orEmpty()}${list?.name.orEmpty()}，到访 ${place.visitCount} 次"
+                        },
+                    ) {
+                        Column(
+                            Modifier.padding(
+                                horizontal = PassportTokens.content.cardHorizontalPadding,
+                                vertical = PassportTokens.content.compactCardVerticalPadding,
                             ),
-                            modifier = Modifier.fillMaxWidth().semantics {
-                                contentDescription = "${place.name}，${list?.stars.orEmpty()}${list?.name.orEmpty()}，到访 ${place.visitCount} 次"
-                            },
                         ) {
-                            Column(Modifier.padding(PassportSpacing.md)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        place.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    FavoriteTierStars(
-                                        tier = place.favoriteTier,
-                                        color = trackFavoriteAccentColor(place.favoriteTier),
-                                        modifier = Modifier.padding(start = PassportSpacing.sm),
-                                    )
-                                }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 Text(
-                                    buildString {
-                                        append("到访 ${place.visitCount} 次")
-                                        place.lastVisitedAt?.let { append(" · 最近 ${dateFormat.format(Date(it))}") }
-                                    },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = trackFavoriteContentColor(place.favoriteTier).copy(alpha = 0.76f),
+                                    place.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                FavoriteTierStars(
+                                    tier = place.favoriteTier,
+                                    color = trackFavoriteAccentColor(place.favoriteTier),
+                                    modifier = Modifier.padding(start = PassportSpacing.sm),
                                 )
                             }
+                            Text(
+                                buildString {
+                                    append("到访 ${place.visitCount} 次")
+                                    place.lastVisitedAt?.let { append(" · 最近 ${dateFormat.format(Date(it))}") }
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = trackFavoriteContentColor(place.favoriteTier).copy(alpha = 0.76f),
+                            )
                         }
                     }
                 }
@@ -431,9 +447,12 @@ internal fun PlaceDetailScreen(
         },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).widthIn(max = PassportSpacing.formMaxWidth)
+            modifier = Modifier.fillMaxSize().widthIn(max = PassportSpacing.formMaxWidth)
                 .padding(horizontal = PassportSpacing.md),
-            contentPadding = PaddingValues(top = PassportSpacing.md, bottom = PassportSpacing.xl),
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + PassportSpacing.md,
+                bottom = padding.calculateBottomPadding() + PassportSpacing.xl,
+            ),
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.md)) {
@@ -550,9 +569,17 @@ internal fun PlaceDetailScreen(
             title = { Text("解除场所关联？") },
             text = { Text("“${track.name}”会保留为独立轨迹，但不再显示这个场所的收藏星标。") },
             confirmButton = {
-                TextButton(onClick = { onUnlinkTrack(track); pendingUnlink = null }) { Text("解除关联") }
+                TextButton(
+                    onClick = { onUnlinkTrack(track); pendingUnlink = null },
+                    shape = PassportTokens.shapes.buttonShape,
+                ) { Text("解除关联") }
             },
-            dismissButton = { TextButton(onClick = { pendingUnlink = null }) { Text("取消") } },
+            dismissButton = {
+                TextButton(
+                    onClick = { pendingUnlink = null },
+                    shape = PassportTokens.shapes.buttonShape,
+                ) { Text("取消") }
+            },
         )
     }
 }
