@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -113,7 +114,11 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { folderPicker.launch(null) }, enabled = !busy) {
+                TextButton(
+                    onClick = { folderPicker.launch(null) },
+                    enabled = !busy,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                ) {
                     Text(if (preferences.folderUri == null) "选择" else "更改")
                 }
             }
@@ -169,7 +174,7 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
                     Text("上次失败：$error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
                 message?.let { value ->
-                    Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -193,6 +198,10 @@ fun BackupSettingsSection(onDataImported: () -> Unit) {
                     },
                     enabled = preferences.folderUri != null && !busy,
                     modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
                 ) { Text(if (busy) "处理中…" else "立即备份") }
                 OutlinedButton(
                     onClick = { importPicker.launch(arrayOf("application/zip", "application/octet-stream")) },

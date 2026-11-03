@@ -95,6 +95,16 @@ internal fun findSavedPlaceMatch(track: TrackPoint, places: List<SavedPlace>): S
     }
 }
 
+internal fun savedPlaceLinksForUnlinkedTracks(
+    tracks: List<TrackPoint>,
+    places: List<SavedPlace>,
+): Map<Long, String> = tracks.asSequence()
+    .filter { it.savedPlaceId == null }
+    .mapNotNull { track ->
+        findSavedPlaceMatch(track, places)?.place?.id?.let { placeId -> track.id to placeId }
+    }
+    .toMap()
+
 internal fun filterSavedPlaces(
     places: List<SavedPlace>,
     selectedTiers: Set<Int>,

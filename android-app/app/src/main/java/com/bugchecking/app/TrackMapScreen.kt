@@ -1,10 +1,10 @@
 package com.bugchecking.app
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -14,6 +14,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CenterFocusStrong
@@ -24,18 +30,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,40 +54,59 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import org.maplibre.android.MapLibre
-import org.maplibre.android.annotations.Marker
-import org.maplibre.android.annotations.MarkerOptions
-import org.maplibre.android.annotations.PolylineOptions
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
-import org.maplibre.android.annotations.Icon
-import org.maplibre.android.annotations.IconFactory
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.PropertyFactory.circleColor
+import org.maplibre.android.style.layers.PropertyFactory.circleRadius
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
+import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
+import org.maplibre.android.style.layers.PropertyFactory.iconImage
+import org.maplibre.android.style.layers.PropertyFactory.lineCap
+import org.maplibre.android.style.layers.PropertyFactory.lineColor
+import org.maplibre.android.style.layers.PropertyFactory.lineJoin
+import org.maplibre.android.style.layers.PropertyFactory.lineWidth
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
 import java.text.DateFormat
 import java.util.Date
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import kotlin.math.floor
-import kotlin.math.pow
 
 private const val OPENFREEMAP_LIGHT_STYLE = "https://tiles.openfreemap.org/styles/liberty"
 private const val OPENFREEMAP_DARK_STYLE = "https://tiles.openfreemap.org/styles/dark"
+private const val TRACK_ROUTE_SOURCE_ID = "bugchecking-track-routes"
+private const val TRACK_POINT_SOURCE_ID = "bugchecking-track-points"
+private const val TRACK_ROUTE_LAYER_ID = "bugchecking-track-route-line"
+private const val TRACK_ID_PROPERTY = "trackId"
+private const val FAVORITE_TIER_PROPERTY = "favoriteTier"
+private const val TRACK_ROUTE_WIDTH = 4f
+private const val TRACK_POINT_RADIUS = 9f
+private const val TRACK_POINT_OUTLINE_WIDTH = 2.5f
+private const val TRACK_FAVORITE_MARKER_SIZE_DP = 36f
+private const val TRACK_FAVORITE_STAR_OUTER_RADIUS_DP = 14f
+private const val TRACK_FAVORITE_STAR_INNER_RADIUS_DP = 6.2f
 
-internal data class TrackCluster(val tracks: List<TrackPoint>, val latitude: Double, val longitude: Double)
+private const val TRACK_ORDINARY_POINT_LAYER_ID = "bugchecking-track-point-0"
+private val trackFavoriteLayerIds = (1..3).map { "bugchecking-track-favorite-$it" }
+private val trackFavoriteImageIds = (1..3).map { "bugchecking-track-favorite-star-$it" }
+private val trackPointLayerIds = listOf(TRACK_ORDINARY_POINT_LAYER_ID) + trackFavoriteLayerIds
+
 internal data class TrackDaySegment(val date: LocalDate, val tracks: List<TrackPoint>)
-
-internal fun clusterTracks(rows: List<TrackPoint>, zoom: Double): List<TrackCluster> {
-    if (rows.isEmpty()) return emptyList()
-    val cellDegrees = 360.0 / (2.0.pow(zoom.coerceIn(1.0, 20.0)) * 8.0)
-    return rows.groupBy { floor(it.lat / cellDegrees) to floor(it.lon / cellDegrees) }.values.map { group ->
-        TrackCluster(group, group.map { it.lat }.average(), group.map { it.lon }.average())
-    }
-}
-
-internal fun clusterFavoriteTier(cluster: TrackCluster): Int =
-    cluster.tracks.maxOfOrNull(TrackPoint::favoriteTier)?.coerceIn(0, 3) ?: 0
 
 internal fun dailyTrackSegments(
     rows: List<TrackPoint>,
@@ -92,39 +117,68 @@ internal fun dailyTrackSegments(
     .sortedBy(Map.Entry<LocalDate, List<TrackPoint>>::key)
     .map { (date, tracks) -> TrackDaySegment(date, tracks.sortedBy(TrackPoint::time)) }
 
+internal fun trackPointFeatureCollection(rows: List<TrackPoint>): FeatureCollection =
+    FeatureCollection.fromFeatures(rows.map { track ->
+        Feature.fromGeometry(Point.fromLngLat(track.lon, track.lat)).apply {
+            addStringProperty(TRACK_ID_PROPERTY, track.id.toString())
+            addNumberProperty(FAVORITE_TIER_PROPERTY, track.favoriteTier.coerceIn(0, 3))
+        }
+    })
+
+internal fun trackRouteFeatureCollection(
+    rows: List<TrackPoint>,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): FeatureCollection = FeatureCollection.fromFeatures(
+    dailyTrackSegments(rows, zoneId)
+        .filter { it.tracks.size > 1 }
+        .map { day ->
+            Feature.fromGeometry(
+                LineString.fromLngLats(day.tracks.map { Point.fromLngLat(it.lon, it.lat) }),
+            ).apply { addStringProperty("date", day.date.toString()) }
+        },
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TrackMapScreen(
     rows: List<TrackPoint>,
     onBack: () -> Unit,
-    onEdit: (TrackPoint) -> Unit,
+    onLocateInTracks: (TrackPoint) -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val darkTheme = isSystemInDarkTheme()
-    val routeColor = MaterialTheme.colorScheme.primary.toArgb()
+    val routeColor = MaterialTheme.colorScheme.tertiary.toArgb()
     val markerOutlineColor = MaterialTheme.colorScheme.surface.toArgb()
     val favoriteMarkerColors = (1..3).map { trackFavoriteMapColor(it).toArgb() }
+    val displayMetrics = context.resources.displayMetrics
+    val favoriteMarkerImages = remember(
+        favoriteMarkerColors,
+        markerOutlineColor,
+        displayMetrics.density,
+        displayMetrics.densityDpi,
+    ) {
+        favoriteMarkerColors.map { color ->
+            createFavoriteMarkerBitmap(
+                density = displayMetrics.density,
+                densityDpi = displayMetrics.densityDpi,
+                fillColor = color,
+                outlineColor = markerOutlineColor,
+            )
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     val mapView = remember {
         MapLibre.getInstance(context)
         MapView(context).also { it.onCreate(Bundle()) }
     }
-    val ordinaryMarkerIcon = remember(routeColor, markerOutlineColor) {
-        createTrackMarkerIcon(context, routeColor, markerOutlineColor, favorite = false)
-    }
-    val favoriteMarkerIcons = remember(favoriteMarkerColors, markerOutlineColor) {
-        favoriteMarkerColors.map { color ->
-            createTrackMarkerIcon(context, color, markerOutlineColor, favorite = true)
-        }
-    }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var selected by remember { mutableStateOf<TrackPoint?>(null) }
-    var mapPickerTrack by remember { mutableStateOf<TrackPoint?>(null) }
-    var zoom by remember { mutableDoubleStateOf(4.0) }
+    var styleRevision by remember { mutableIntStateOf(0) }
     var styleAttempt by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    val latestRows = rememberUpdatedState(rows)
 
     fun fitMap(current: MapLibreMap) {
         if (rows.isEmpty()) return
@@ -161,11 +215,19 @@ internal fun TrackMapScreen(
         error = null
         mapView.getMapAsync { ready ->
             map = ready
+            ready.uiSettings.isAttributionEnabled = false
+            ready.uiSettings.isLogoEnabled = false
             ready.setStyle(if (darkTheme) OPENFREEMAP_DARK_STYLE else OPENFREEMAP_LIGHT_STYLE) {
                 loading = false
                 error = null
-                zoom = ready.cameraPosition.zoom
-                ready.addOnCameraIdleListener { zoom = ready.cameraPosition.zoom }
+                installTrackGeometryLayers(
+                    style = it,
+                    rows = latestRows.value,
+                    routeColor = routeColor,
+                    markerOutlineColor = markerOutlineColor,
+                    favoriteMarkerImages = favoriteMarkerImages,
+                )
+                styleRevision++
                 fitMap(ready)
             }
         }
@@ -173,34 +235,53 @@ internal fun TrackMapScreen(
         if (loading) error = "底图加载失败或网络不可用"
     }
 
-    LaunchedEffect(map, rows, zoom, loading, routeColor, markerOutlineColor) {
+    LaunchedEffect(map, rows) {
         val current = map ?: return@LaunchedEffect
         if (loading) return@LaunchedEffect
-        current.clear()
-        dailyTrackSegments(rows).forEach { day ->
-            if (day.tracks.size < 2) return@forEach
-                current.addPolyline(
-                    PolylineOptions().addAll(day.tracks.map { LatLng(it.lat, it.lon) }).color(routeColor).width(4f)
-                )
-            }
-        val markerRows = mutableMapOf<Long, TrackCluster>()
-        clusterTracks(rows.take(300), zoom).forEach { cluster ->
-            val favoriteTier = clusterFavoriteTier(cluster)
-            val marker = current.addMarker(
-                MarkerOptions()
-                    .position(LatLng(cluster.latitude, cluster.longitude))
-                    .icon(if (favoriteTier > 0) favoriteMarkerIcons[favoriteTier - 1] else ordinaryMarkerIcon)
-                    .title(if (cluster.tracks.size == 1) cluster.tracks[0].name else "${cluster.tracks.size} 个地点")
-                    .snippet(if (cluster.tracks.size == 1) formatTrackTime(cluster.tracks[0]) else "点按放大")
-            )
-            markerRows[marker.id] = cluster
+        current.style?.let { style ->
+            updateTrackGeometrySources(style, rows)
         }
-        current.setOnMarkerClickListener { marker: Marker ->
-            val cluster = markerRows[marker.id] ?: return@setOnMarkerClickListener false
-            if (cluster.tracks.size > 1) {
-                current.animateCamera(CameraUpdateFactory.newLatLngZoom(marker.position, (current.cameraPosition.zoom + 2).coerceAtMost(19.0)))
-            } else selected = cluster.tracks[0]
-            true
+    }
+
+    LaunchedEffect(map, styleRevision, loading, routeColor, markerOutlineColor, favoriteMarkerImages) {
+        val current = map ?: return@LaunchedEffect
+        if (loading) return@LaunchedEffect
+        current.style?.let { style ->
+            updateTrackGeometryStyle(style, routeColor, markerOutlineColor, favoriteMarkerImages)
+        }
+    }
+
+    val latestRowsById = rememberUpdatedState(rows.associateBy(TrackPoint::id))
+    DisposableEffect(map) {
+        val current = map
+        if (current == null) return@DisposableEffect onDispose { }
+        val hitSlopPx = 12f * context.resources.displayMetrics.density
+        val clickListener = MapLibreMap.OnMapClickListener { coordinate ->
+            val screenPoint = current.projection.toScreenLocation(coordinate)
+            val hitArea = RectF(
+                screenPoint.x - hitSlopPx,
+                screenPoint.y - hitSlopPx,
+                screenPoint.x + hitSlopPx,
+                screenPoint.y + hitSlopPx,
+            )
+            val trackFeatures = current.queryRenderedFeatures(
+                hitArea,
+                *trackPointLayerIds.toTypedArray(),
+            )
+            val trackFeature = trackFeatures.firstOrNull()
+            val trackId = trackFeature?.takeIf { it.hasProperty(TRACK_ID_PROPERTY) }
+                ?.getStringProperty(TRACK_ID_PROPERTY)?.toLongOrNull()
+            val track = trackId?.let(latestRowsById.value::get)
+            if (track != null) {
+                selected = track
+                true
+            } else {
+                false
+            }
+        }
+        current.addOnMapClickListener(clickListener)
+        onDispose {
+            current.removeOnMapClickListener(clickListener)
         }
     }
 
@@ -226,11 +307,23 @@ internal fun TrackMapScreen(
                     }
                 }
             }
-            Text(
-                "© OpenStreetMap contributors · OpenFreeMap",
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
-            )
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = RoundedCornerShape(8.dp),
+                tonalElevation = 1.dp,
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+                    )
+                    .padding(8.dp),
+            ) {
+                Text(
+                    "© OpenStreetMap contributors · OpenFreeMap",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
         }
     }
     selected?.let { track ->
@@ -241,76 +334,136 @@ internal fun TrackMapScreen(
             ) {
                 Text(track.name, style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "${formatTrackTime(track)} · 精度 ${track.accuracy.toInt()} m",
+                    formatTrackTime(track),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(onClick = { onEdit(track) }, modifier = Modifier.fillMaxWidth()) { Text("编辑地点") }
-                OutlinedButton(
-                    onClick = { selected = null; mapPickerTrack = track },
+                Button(
+                    onClick = {
+                        selected = null
+                        onLocateInTracks(track)
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("在地图中查看")
+                    Text("在轨迹记录中定位")
                 }
             }
         }
-    }
-    mapPickerTrack?.let { track ->
-        MapProviderPickerSheet(
-            onDismiss = { mapPickerTrack = null; selected = track },
-            onAmap = {
-                mapPickerTrack = null
-                ExternalMapLauncher.openAmap(context, track)
-            },
-            onGoogle = {
-                mapPickerTrack = null
-                ExternalMapLauncher.openGoogle(context, track)
-            },
-        )
     }
 }
 
 private fun formatTrackTime(track: TrackPoint): String = DateFormat.getDateTimeInstance().format(Date(track.time))
 
-private fun createTrackMarkerIcon(
-    context: Context,
+private fun installTrackGeometryLayers(
+    style: Style,
+    rows: List<TrackPoint>,
+    routeColor: Int,
+    markerOutlineColor: Int,
+    favoriteMarkerImages: List<Bitmap>,
+) {
+    style.addSource(GeoJsonSource(TRACK_ROUTE_SOURCE_ID, trackRouteFeatureCollection(rows)))
+    style.addSource(GeoJsonSource(TRACK_POINT_SOURCE_ID, trackPointFeatureCollection(rows)))
+    trackFavoriteImageIds.zip(favoriteMarkerImages).forEach { (imageId, bitmap) ->
+        style.addImage(imageId, bitmap)
+    }
+    style.addLayer(
+        LineLayer(TRACK_ROUTE_LAYER_ID, TRACK_ROUTE_SOURCE_ID).withProperties(
+            lineColor(routeColor),
+            lineWidth(TRACK_ROUTE_WIDTH),
+            lineCap(Property.LINE_CAP_ROUND),
+            lineJoin(Property.LINE_JOIN_ROUND),
+        ),
+    )
+    style.addLayer(
+        CircleLayer(TRACK_ORDINARY_POINT_LAYER_ID, TRACK_POINT_SOURCE_ID)
+            .withFilter(trackTierFilter(0))
+            .withProperties(
+                circleColor(routeColor),
+                circleRadius(TRACK_POINT_RADIUS),
+                circleStrokeColor(markerOutlineColor),
+                circleStrokeWidth(TRACK_POINT_OUTLINE_WIDTH),
+            ),
+    )
+    trackFavoriteLayerIds.forEachIndexed { index, layerId ->
+        style.addLayer(
+            SymbolLayer(layerId, TRACK_POINT_SOURCE_ID)
+                .withFilter(trackTierFilter(index + 1))
+                .withProperties(
+                    iconImage(trackFavoriteImageIds[index]),
+                    iconAllowOverlap(true),
+                    iconIgnorePlacement(true),
+                ),
+        )
+    }
+}
+
+private fun trackTierFilter(tier: Int): Expression = Expression.eq(
+    Expression.get(FAVORITE_TIER_PROPERTY),
+    tier,
+)
+
+private fun updateTrackGeometrySources(style: Style, rows: List<TrackPoint>) {
+    style.getSourceAs<GeoJsonSource>(TRACK_ROUTE_SOURCE_ID)?.setGeoJson(trackRouteFeatureCollection(rows))
+    style.getSourceAs<GeoJsonSource>(TRACK_POINT_SOURCE_ID)?.setGeoJson(trackPointFeatureCollection(rows))
+}
+
+private fun updateTrackGeometryStyle(
+    style: Style,
+    routeColor: Int,
+    markerOutlineColor: Int,
+    favoriteMarkerImages: List<Bitmap>,
+) {
+    style.getLayerAs<LineLayer>(TRACK_ROUTE_LAYER_ID)?.setProperties(lineColor(routeColor))
+    style.getLayerAs<CircleLayer>(TRACK_ORDINARY_POINT_LAYER_ID)?.setProperties(
+        circleColor(routeColor),
+        circleStrokeColor(markerOutlineColor),
+    )
+    trackFavoriteImageIds.zip(favoriteMarkerImages).forEach { (imageId, bitmap) ->
+        style.addImage(imageId, bitmap)
+    }
+}
+
+private fun createFavoriteMarkerBitmap(
+    density: Float,
+    densityDpi: Int,
     fillColor: Int,
     outlineColor: Int,
-    favorite: Boolean,
-): Icon {
-    val density = context.resources.displayMetrics.density
-    val size = (36f * density).toInt().coerceAtLeast(36)
+): Bitmap {
+    val size = (TRACK_FAVORITE_MARKER_SIZE_DP * density).toInt().coerceAtLeast(36)
     val center = size / 2f
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = fillColor
-        style = Paint.Style.FILL
-    }
-    val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = outlineColor
-        style = Paint.Style.STROKE
-        strokeWidth = 2.5f * density
-        strokeJoin = Paint.Join.ROUND
-    }
-    if (favorite) {
-        val path = Path()
-        val outerRadius = 14f * density
-        val innerRadius = 6.2f * density
+    val path = Path().apply {
         repeat(10) { point ->
-            val angle = Math.toRadians(-90.0 + point * 36.0)
-            val radius = if (point % 2 == 0) outerRadius else innerRadius
+            val angle = Math.toRadians((-90.0 + point * 36.0))
+            val radius = if (point % 2 == 0) {
+                TRACK_FAVORITE_STAR_OUTER_RADIUS_DP * density
+            } else {
+                TRACK_FAVORITE_STAR_INNER_RADIUS_DP * density
+            }
             val x = center + (kotlin.math.cos(angle) * radius).toFloat()
             val y = center + (kotlin.math.sin(angle) * radius).toFloat()
-            if (point == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            if (point == 0) moveTo(x, y) else lineTo(x, y)
         }
-        path.close()
-        canvas.drawPath(path, fill)
-        canvas.drawPath(path, outline)
-    } else {
-        val radius = 9f * density
-        canvas.drawCircle(center, center, radius, fill)
-        canvas.drawCircle(center, center, radius, outline)
+        close()
     }
-    return IconFactory.getInstance(context).fromBitmap(bitmap)
+    return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).apply {
+        this.density = densityDpi
+        Canvas(this).apply {
+            drawPath(
+                path,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = fillColor
+                    style = Paint.Style.FILL
+                },
+            )
+            drawPath(
+                path,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = outlineColor
+                    style = Paint.Style.STROKE
+                    strokeWidth = TRACK_POINT_OUTLINE_WIDTH * density
+                    strokeJoin = Paint.Join.ROUND
+                },
+            )
+        }
+    }
 }

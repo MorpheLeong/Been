@@ -2,6 +2,7 @@ package com.bugchecking.app
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
@@ -17,6 +18,13 @@ import java.time.ZonedDateTime
 import java.util.Calendar
 
 class PrimaryPagesTest {
+    @Test fun reconnectPolicyBoundsEachCycleToThreeAttemptsWithinOneMinute() {
+        assertEquals(2_000L, reconnectDelayMs(0))
+        assertEquals(8_000L, reconnectDelayMs(1))
+        assertNull(reconnectDelayMs(2))
+        assertEquals(2_000L, reconnectDelayMs(-1))
+    }
+
     @Test fun deviceActionMapsConnectionAndSyncStates() {
         assertEquals(
             DeviceActionState.DISCONNECTED,
@@ -130,9 +138,43 @@ class PrimaryPagesTest {
         assertEquals(true, shouldStackTrackFields(maxWidthDp = 400f, fontScale = 2f))
     }
 
+    @Test fun longTrackEditorValuesUseATrailingEllipsisOnlyWhenNeeded() {
+        assertEquals("外滩", collapsedEditorValue("外滩", maxCharacters = 6))
+        assertEquals("上海外…", collapsedEditorValue("上海外滩老码头", maxCharacters = 4))
+        assertEquals(18, collapsedEditorCharacterLimit(fontScale = 1f))
+        assertEquals(12, collapsedEditorCharacterLimit(fontScale = 1.5f))
+        assertEquals(9, collapsedEditorCharacterLimit(fontScale = 2f))
+    }
+
+    @Test fun trackHomeSignatureTargetsAndCardTitleContractStayStable() {
+        assertEquals(48.dp, TrackHomeActionTokens.signatureTargetSize)
+        assertEquals(48.dp, PrimaryTopActionTokens.targetSize)
+        assertEquals(8.dp, PrimaryTopActionTokens.safeAreaGap)
+        assertEquals(64.dp, PrimaryTopActionTokens.primaryContentBreathingRoom)
+        assertEquals(16.dp, PrimaryTopActionTokens.detailContentGap)
+        assertEquals(8.dp, PrimaryTopActionTokens.minimumGroupGap)
+        assertTrue(TrackHomeActionTokens.safeBottomReserve >= 72.dp)
+        assertEquals(1, TrackHomeActionTokens.cardTitleMaxLines)
+    }
+
+    @Test fun primaryNavigationMovesMeToTheAvatarAction() {
+        assertEquals(listOf(Tab.Tracks, Tab.Checklist, Tab.Qr), primaryNavigationTabs)
+        assertTrue(Tab.Me !in primaryNavigationTabs)
+    }
+
+    @Test fun deviceCapsulePreservesTheCenteredTrackActions() {
+        assertEquals(108f, deviceCapsuleMaxWidthDp(328f, true, 132f))
+        assertEquals(132f, deviceCapsuleMaxWidthDp(328f, false, 132f))
+        assertEquals(220f, deviceCapsuleMaxWidthDp(792f, true, 220f))
+        assertEquals(48f, deviceCapsuleMaxWidthDp(160f, true, 132f))
+    }
+
     @Test fun unknownAccuracyUsesManualCoordinateLabel() {
         val manual = TrackPoint(1, "manual-1", null, "外滩", 31.23, 121.47, 1L, 0f)
+        assertEquals(null, trackPrecisionLabel(0f))
+        assertEquals("精度 30\u00A0m", trackPrecisionLabel(30f))
         assertEquals("手动坐标", trackAccuracyLabel(manual))
+        assertEquals("精度 30\u00A0m", trackAccuracyLabel(manual.copy(accuracy = 30f)))
     }
 
     @Test fun mapTrackLinesAreSplitByLocalDateAndOrderedWithinEachDay() {
@@ -158,20 +200,30 @@ class PrimaryPagesTest {
         assertEquals(2, segments.size)
     }
 
-    @Test fun mapClusterUsesItsHighestFavoriteTier() {
-        fun point(id: Long, tier: Int) = TrackPoint(
+    @Test fun mapRouteGeoJsonKeepsOrderedGeographicVertices() {
+        val zone = ZoneId.of("UTC")
+        fun point(id: Long, time: String, lat: Double, lon: Double) = TrackPoint(
             id = id,
             requestId = "track-$id",
             destinationId = null,
             name = "地点$id",
-            lat = 31.0,
-            lon = 121.0,
-            time = id,
+            lat = lat,
+            lon = lon,
+            time = ZonedDateTime.parse(time).toInstant().toEpochMilli(),
             accuracy = 10f,
-            favoriteTier = tier,
         )
-        assertEquals(0, clusterFavoriteTier(TrackCluster(listOf(point(1, 0)), 31.0, 121.0)))
-        assertEquals(3, clusterFavoriteTier(TrackCluster(listOf(point(1, 1), point(2, 3)), 31.0, 121.0)))
+        val collection = trackRouteFeatureCollection(
+            listOf(
+                point(2, "2026-10-19T18:00:00Z", 31.2, 121.2),
+                point(1, "2026-10-19T08:00:00Z", 31.1, 121.1),
+                point(3, "2026-10-20T08:00:00Z", 31.3, 121.3),
+            ),
+            zone,
+        )
+
+        val line = collection.features().orEmpty().single().geometry() as org.maplibre.geojson.LineString
+        assertEquals(listOf(121.1, 121.2), line.coordinates().map { it.longitude() })
+        assertEquals(listOf(31.1, 31.2), line.coordinates().map { it.latitude() })
     }
 
     @Test fun reorderHelperMovesOneStableIdWithoutDroppingItems() {
@@ -323,6 +375,39 @@ class PrimaryPagesTest {
         assertEquals(listOf("a"), filterSavedPlaces(places, setOf(1, 2, 3), "青禾").map(SavedPlace::id))
         assertEquals(listOf("b"), filterSavedPlaces(places, setOf(3), "coffee-id").map(SavedPlace::id))
         assertEquals(emptyList<String>(), filterSavedPlaces(places, emptySet(), "").map(SavedPlace::id))
+    }
+
+    @Test fun newlySavedPlaceBackfillsUnlinkedHistoricalTracksWithoutOverridingExistingLinks() {
+        val place = SavedPlace(
+            "saved", "同一家店", 2, PlaceProvider.AMAP,
+            latitude = 31.0, longitude = 121.0, createdAt = 1, updatedAt = 1,
+        )
+        val tracks = listOf(
+            TrackPoint(1, "one", null, "同一家店", 31.0001, 121.0001, 1, 20f),
+            TrackPoint(2, "two", null, "另一家店", 31.0001, 121.0001, 1, 20f),
+            TrackPoint(
+                3, "three", null, "同一家店", 31.0001, 121.0001, 1, 20f,
+                savedPlaceId = "existing",
+            ),
+        )
+
+        assertEquals(mapOf(1L to "saved"), savedPlaceLinksForUnlinkedTracks(tracks, listOf(place)))
+    }
+
+    @Test fun historicalBackfillStillRejectsAmbiguousSameNamePlaces() {
+        fun place(id: String, lat: Double, lon: Double) = SavedPlace(
+            id, "同名场所", 1, PlaceProvider.AMAP,
+            latitude = lat, longitude = lon, createdAt = 1, updatedAt = 1,
+        )
+        val track = TrackPoint(4, "four", null, "同名场所", 31.0, 121.0, 1, 30f)
+
+        assertEquals(
+            emptyMap<Long, String>(),
+            savedPlaceLinksForUnlinkedTracks(
+                listOf(track),
+                listOf(place("first", 31.0, 121.0), place("second", 31.0001, 121.0001)),
+            ),
+        )
     }
 
     @Test fun dailyRetentionNeverDeletesLayeredOrManualBackups() {

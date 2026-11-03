@@ -238,14 +238,25 @@ class PlaceAndImportTest {
         assertEquals(listOf("日期", "目的地", "景点"), result.availableColumns)
     }
 
-    @Test fun clustersDensePointsButLeavesDistantPointSeparate() {
-        fun track(id: Long, lat: Double, lon: Double) = TrackPoint(id, "$id", null, "地点$id", lat, lon, 0, 5f)
-        val result = clusterTracks(
-            listOf(track(1, 39.91630, 116.39720), track(2, 39.91631, 116.39721), track(3, 31.2304, 121.4737)),
-            zoom = 12.0,
+    @Test fun mapPointGeoJsonPreservesEveryCoordinateAndFavoriteTier() {
+        fun track(id: Long, lat: Double, lon: Double, tier: Int) =
+            TrackPoint(id, "$id", null, "地点$id", lat, lon, 0, 5f, favoriteTier = tier)
+        val rows = listOf(
+            track(1, 39.91630, 116.39720, 0),
+            track(2, 39.91631, 116.39721, 2),
+            track(3, 31.2304, 121.4737, 3),
         )
-        assertEquals(2, result.size)
-        assertTrue(result.any { it.tracks.size == 2 })
+
+        val features = trackPointFeatureCollection(rows).features().orEmpty()
+
+        assertEquals(rows.size, features.size)
+        features.zip(rows).forEach { (feature, row) ->
+            val point = feature.geometry() as org.maplibre.geojson.Point
+            assertEquals(row.lon, point.longitude(), 0.0000001)
+            assertEquals(row.lat, point.latitude(), 0.0000001)
+            assertEquals(row.id.toString(), feature.getStringProperty("trackId"))
+            assertEquals(row.favoriteTier, feature.getNumberProperty("favoriteTier").toInt())
+        }
     }
 
     @Test fun connectsOnlyTracksFromTheSameDayInTimeOrder() {

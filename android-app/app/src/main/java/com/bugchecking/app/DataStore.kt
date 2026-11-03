@@ -489,6 +489,7 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
             )
             db.execSQL("UPDATE tracks SET saved_place_id=?,favorite_tier=? WHERE id=?", arrayOf<Any>(placeId, tier, id))
             db.execSQL("UPDATE tracks SET favorite_tier=? WHERE saved_place_id=?", arrayOf<Any>(tier, placeId))
+            reconcileUnlinkedTracksWithSavedPlace(placeId)
         }
         return true
     }
@@ -547,6 +548,22 @@ class PassportDb(context: Context) : SQLiteOpenHelper(context, "passport.db", nu
             "UPDATE tracks SET saved_place_id=?,favorite_tier=? WHERE id=?",
             arrayOf<Any>(match.place.id, match.place.favoriteTier, id),
         )
+    }
+
+    private fun reconcileUnlinkedTracksWithSavedPlace(targetPlaceId: String) {
+        val places = savedPlaces(favoritesOnly = false)
+        if (places.isEmpty()) return
+        val unlinkedTracks = queryTracks(
+            "SELECT $TRACK_COLUMNS FROM tracks WHERE saved_place_id IS NULL ORDER BY time DESC",
+        )
+        val links = savedPlaceLinksForUnlinkedTracks(unlinkedTracks, places)
+        links.filterValues { it == targetPlaceId }.forEach { (trackId, placeId) ->
+            val place = places.firstOrNull { it.id == placeId } ?: return@forEach
+            writableDatabase.execSQL(
+                "UPDATE tracks SET saved_place_id=?,favorite_tier=? WHERE id=?",
+                arrayOf<Any>(place.id, place.favoriteTier, trackId),
+            )
+        }
     }
     @Synchronized fun hasTrack(requestId: String): Boolean = readableDatabase.rawQuery("SELECT 1 FROM tracks WHERE request_id=?", arrayOf(requestId)).use { it.moveToFirst() }
     @Synchronized fun updateTrackName(id: Long, name: String) {

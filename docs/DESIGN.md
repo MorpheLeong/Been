@@ -4,17 +4,15 @@
 name: BugChecking Android
 description: Normative UI and interaction rules for the BugChecking Android companion app.
 colors:
-  route-blue: "#4B69A2"
-  passport-ink: "#172A3A"
-  candy-blue: "#D9E5FF"
-  waypoint-mint: "#3A7566"
-  candy-mint: "#C5F1DF"
-  journey-peach: "#95566B"
-  candy-peach: "#FFD9E3"
-  candy-lemon: "#FFE8A3"
-  mist-surface: "#FFF9F2"
-  night-surface: "#202B36"
-  night-on-surface: "#F0F4F8"
+  action-neon: "#53FF9A"
+  on-action-neon: "#00351D"
+  device-disconnected: "#007A49"
+  journey-light: "#C3004F"
+  journey-dark: "#FF5A86"
+  light-canvas: "#FBE8DB"
+  light-card: "#F5D9D5"
+  dark-canvas: "#121212"
+  dark-on-surface: "#E8BDC8"
 typography:
   family: Android system sans
   headline: Material 3 headlineSmall semibold
@@ -51,18 +49,18 @@ This document is normative for new Android UI and for changes to existing screen
 
 BugChecking is a personal Android companion for preparing trips, managing check-in content, recording real visits, and synchronising identity and selected content to the BugChecking device. Its current audience is the product owner/developer, who knows its hidden gestures and data model; first-use conversion and zero learning cost are not goals. It is an Operate surface with Explore/Play qualities: functional accuracy, visual identity, and interaction delight outrank explanatory copy and explicit labels.
 
-The visual world combines a centred-crop halftone city map with Material 3 Dynamic Soft Candy containers in light mode and Night Fog blue-grey surfaces in dark mode. The map is a quiet geographic memory, not the content itself. Cards and controls sit above it as readable, task-oriented layers. Brand character comes from the journey band, map texture, candy semantic containers, and precise motion—not from ornamental gradients, glows, or novel controls.
+The visual world combines a centred-crop halftone city map, a pale-apricot light canvas, rose-peach surfaces, and charcoal/grey-pink dark surfaces. Neon green and candy red are scarce functional accents rather than component defaults. The map is a quiet geographic memory, not the content itself. Cards and controls sit above it as readable, task-oriented layers. Brand character comes from the journey band, map texture, warm surfaces, and precise motion—not from ornamental gradients, glows, or novel controls.
 
 **Key characteristics:**
 
 - Recognisable city-map ground with role-based translucent surfaces.
-- Bright but calm candy containers; blue-grey Night Fog rather than pure black.
+- A glare-reduced pale-apricot canvas with warm cards in light mode; charcoal canvas and grey-pink text in dark mode.
 - A restrained Material 3 component vocabulary and Material icon family.
 - One dominant action per view. Map and Place library remain persistently visible signature actions on Tracks, with lower emphasis than Add.
 - Purposeful state motion, never decorative choreography.
 - Dark mode, long content, map zoom, and system insets never cause unreadable, displaced, or geographically incorrect output.
 
-**The Preserve-the-Atlas Rule.** Refinement may adjust opacity, hierarchy, and contrast, but must not remove the map identity, Dynamic Soft Candy, Night Fog, or journey band without explicit product approval.
+**The Preserve-the-Atlas Rule.** Refinement may adjust opacity, hierarchy, and contrast, but must not remove the map identity, warm candy system, charcoal/grey-pink dark system, or journey band without explicit product approval.
 
 **The Operate-First Rule.** When expression competes with reading, target access, error recovery, or Android conventions, the task wins.
 
@@ -78,21 +76,83 @@ Colour follows three layers:
 2. **Semantic roles:** `MaterialTheme.colorScheme` roles, including `primary`, `secondary`, `tertiary`, their containers and `on*` partners, the surface-container ladder, `outline`, `outlineVariant`, and `error`.
 3. **Component roles:** primary-page chrome, navigation, card, summary, selection, favourite tiers, and map markers. Component roles must resolve through semantic roles unless a fixed product colour is required and documented.
 
+### Accepted UI-U1 contracts
+
+| ID | Accepted resolution |
+| --- | --- |
+| `content/on-image-surface` | Transparent root scaffolds explicitly set `MaterialTheme.colorScheme.onSurface` as content colour. |
+| `surface/form-opaque` | Dense editor/form surfaces resolve through opaque `MaterialTheme.colorScheme.surface` or stable surface roles; they do not inherit translucent primary-page card/chrome treatment. |
+| `layout/editor-bottom-reserve` | Scroll content reserves the measured fixed-action height plus navigation/IME insets. The action host is transparent and does not add an outer tonal Surface. |
+| `layout/safe-drawing-bottom` | Map attribution and edge controls consume horizontal and bottom `safeDrawing`/system-navigation insets. |
+| `map/attribution-scrim` | Attribution uses `surface.copy(alpha = 0.88f)` with matching `onSurface`, 8 dp shape, 1 dp tonal elevation, padding, and safe-drawing awareness. |
+
+These BugChecking project contracts were accepted through the UI-U1 PLZ110 device matrix on 2026-10-29. They do not promote the unresolved map-geometry candidates owned by UI-U2.
+
+### Accepted UI-U2 contracts
+
+| ID | Accepted resolution |
+| --- | --- |
+| `map/route-line-color` | Route lines resolve to `MaterialTheme.colorScheme.primary`. |
+| `map/route-line-width` | The renderer `LineLayer` uses 4f style units with round caps and joins. |
+| `map/point-size` | Ordinary points use renderer circles with a 9f style-unit radius. |
+| `map/point-outline-width` | Ordinary points use a 2.5f style-unit semantic-surface outline; the 36 dp favourite-star bitmap keeps an equivalent 2.5 dp outline. |
+| `map/favourite-point-colors` | Favourite tiers 1–3 use the established `trackFavoriteMapColor` semantic colours and a consistent 36 dp five-point star. |
+| `motion/track-focus-cue` | After scrolling, the target card shows a 2 dp primary outline for 1.8 seconds and fades it over 450 ms. |
+| Renderer-coordinate contract | MapLibre GeoJSON sources/layers own points and routes; UI code does not reimplement projection or rebuild annotations after camera idle. |
+
+These BugChecking project contracts passed the UI-U2 PLZ110 and owner acceptance on 2026-10-30. `map/cluster-radius` and `map/cluster-zoom-thresholds` remain `proposed` because native clustering compatibility is deferred.
+
+### Accepted UI-U3 contracts
+
+| ID | Accepted resolution |
+| --- | --- |
+| `action/track-primary-fab` | Add Track is the only FAB on Tracks and uses the standard Material 3 primary FAB role. Map and Place library never reuse its complete size, tone, and elevation combination. |
+| `action/track-signature-icon` | Map and Place library share one persistent secondary action strip using `secondaryContainer` / `onSecondaryContainer`, the 16 dp large shape, 1 dp tonal elevation, and one 48 × 48 dp IconButton target per action. |
+| `layout/track-action-gap` | The signature strip starts 8 dp below the Tracks content edge; it occupies layout space rather than floating over cards. |
+| `layout/track-action-safe-reserve` | The Tracks list reserves 104 dp at the bottom so its final card can clear the sole primary FAB; the signature strip requires no overlay reserve because it is outside the scroll viewport. |
+| `track-card/title-max-lines` | Track-card place names use exactly one line. |
+| `track-card/title-overflow` | Overflow is trailing ellipsis; automatic wrapping and height changes are forbidden. |
+
+These BugChecking project contracts passed the PLZ110 1.0× / 2.0× font matrix and owner acceptance on 2026-10-30. UI-U4 is unlocked; these rules remain project-scoped rather than becoming a cross-project personal preference.
+
+The accepted product intent—Add as the sole FAB, Map/Place library persistently visible, and equal-height one-line cards—remains binding. The earlier in-flow placement of the signature strip is superseded in the current implementation by the pending scrimless-shell contract below; that new geometry is not accepted until its own device review.
+
+### Current UI-U3.5 implementation rules (pending device acceptance)
+
+UI-U3.5 uses a fixed brand palette and no longer derives colour from Android wallpaper. The following rules are current implementation contracts; they may become `accepted` or enter long-term memory only after the device matrix and explicit owner acceptance:
+
+| ID | Current definition |
+| --- | --- |
+| `color/action-neon` | Neon green `#53FF9A` is a scarce action/status accent. A Button, TonalButton, Slider, or icon does not receive it merely because of component type. |
+| `color/device-disconnected` | The floating device action uses deep green `#007A49` when disconnected; connecting, connected, syncing, and sync-ready icons use neon green. Its neutral container never inherits the accent. The device entry outranks the FAB. |
+| `color/journey` | Journey lines and checklist progress use candy red: light `#C3004F`, dark `#FF5A86`. UI-U2 geometry remains accepted; UI-U3.5 only replaces the old primary colour mapping with this journey role. |
+| `surface/light-canvas` | The light canvas is pale apricot `#FBE8DB`; cards, chrome, and forms use adjacent rose-peach surface steps. Never change only the canvas and leave other surfaces as pale islands. |
+| `surface/dark-canvas` | The dark canvas is `#121212` with grey-pink semantic text/borders; dark is not a mechanical inversion of light. |
+| `action/editor-helper-neutral` | Track editor Add/Edit helpers—Expand/Find, Map and Link icons, Relocate, and their loading feedback—use `onSurfaceVariant` or neutral surfaces, not neon green. |
+| `card/checklist-progress` | The completion card uses the normal card surface; progress uses the journey role and a neutral track. |
+| `card/qr-star` | Every QR card uses the normal card surface; only the active star retains neon green. Inactive star, Edit, and Delete remain neutral. |
+| `action/profile-backup-neutral` | Change avatar, Save profile, the volume slider, Change, and Back up now remain neutral rather than neon green. |
+| `layout/primary-floating-actions` | Primary pages have no solid top app bar or page title. A scrimless overlay aligns 48 dp Profile, signature, and device controls 8 dp below the safe top inset; uncovered regions never intercept content. Tracks, Checklist, and QR begin after a shared 64 dp transparent breathing region and may scroll behind it. |
+| `navigation/profile-avatar` | Compact/rail navigation contains Tracks, Checklist, and QR. The circular avatar opens Me as an independent secondary page; Me hides bottom/rail navigation and replaces the avatar with a top-left Back action. |
+| `motion/device-capsule` | The neutral 48 dp device control keeps its right edge fixed. Status text expands left, enters in 320 ms, exits in 260 ms, ellipsises before the centred signature strip, and exposes the full message through a polite live region. |
+
+**Operational importance first.** Rank core state/actions, signature states, and ordinary helpers from the real task before assigning colour. A Material component variant defines structure and behaviour; it does not automatically define product emphasis.
+
+**One green per role.** Do not place several near-green hues at the same hierarchy on one screen. If status needs differentiation, name the semantic role and keep a non-colour cue. Current green roles are limited to neon action/status emphasis and disconnected deep green.
+
 ### Light mode
 
-- Route Blue is the action and journey accent.
-- Candy Blue is the high-emphasis summary/primary container.
-- Waypoint Mint and Candy Mint support secondary actions and place/favourite meaning.
-- Journey Peach and Candy Peach are complementary accents, not generic decoration.
-- Candy Lemon is reserved for the highest neutral surface step, not status warning.
-- Mist Surface is the static fallback ground.
+- Pale apricot `#FBE8DB` is the canvas; cards, top/bottom chrome, and forms resolve through the rose-peach surface ladder.
+- Neon green is reserved for the high-value actions/states explicitly listed in UI-U3.5, never as a default ordinary-control colour.
+- Candy red carries the journey line, track points, and checklist progress; it is not the generic error role.
+- Any canvas change must recheck the composed map mask, journey line, cards, and chrome. Never replace only the background.
 
 ### Dark mode
 
-- Night Fog uses tinted blue-grey surface steps from lowest through highest; never substitute pure black.
-- `night-on-surface` and the defined on-container colours are mandatory for text and icons.
+- Dark mode uses the `#121212` charcoal canvas and adjacent neutral surfaces; text and boundaries use grey-pink semantic roles.
+- Neon green and candy red keep the same functional ownership as light mode; semantics are not reassigned by visual brightness.
 - Page-level content on a transparent scaffold must explicitly inherit `onSurface`; never rely on an ambient default.
-- Dynamic dark colour may be softened toward the accepted Night Fog containers, but paired on-colours must remain valid.
+- Each container continues to use its paired `on*` or surface foreground; do not mechanically invert the light theme.
 
 ### Map and translucency
 
@@ -100,6 +160,9 @@ Colour follows three layers:
 - Translucency is defined by role, not per-screen taste: top/bottom chrome, routine list card, summary/selected card, and form container are separate roles.
 - Map attribution, zoom/location controls, and the viewport consume `safeDrawing`/navigation-bar insets. Attribution never hugs the gesture bar, sits under map labels, or clips at an edge.
 - Track points and route lines use geographic sources/layers owned by the map renderer so they stay anchored through zoom, rotation, and pan. Do not depend on clearing and rebuilding screen annotations after camera-idle events to maintain position.
+- Ordinary track points use circles. Favourite places always use five-point stars on the map, coloured by the existing favourite-tier semantics. The star is a renderer `SymbolLayer` icon bound to the same geographic point feature; never reintroduce a screen-space annotation solely to change its shape.
+- Tapping an ordinary point or favourite star opens a map-detail sheet containing only the place name, check-in date/time, and one primary action: “Locate in Tracks”. That action returns to Tracks and scrolls to the matching card. The sheet does not repeat accuracy or expose Edit/external-map actions.
+- After the scroll completes, the target card shows a 2 dp primary-colour outline for 1.8 seconds, then fades it over 450 ms. The cue must not change card size, surface colour, favourite tier, or click behaviour, and it adds no toast or explanatory copy.
 - Dense forms use a more opaque container or local scrim than sparse lists.
 - Final composited text/background pairs must meet 4.5:1 for normal text and 3:1 for large text and UI boundaries. Checking only the uncomposited hex pair is insufficient.
 - Do not lower normal-size supporting text opacity unless the final composite remains at least 4.5:1.
@@ -141,15 +204,17 @@ Track-card place names are an explicit exception: keep one line with trailing el
 - **Expanded (>=840 dp):** NavigationRail plus list-detail or supporting-pane layout where context benefits. Do not merely centre a phone-width page when a second pane improves the task.
 - Foldables must avoid placing primary interaction across a hinge. Expanded support is not considered complete without hinge-aware verification.
 
-All four primary pages share the same main-content start and shell geometry. Content is top-aligned within its max width. Primary-page lists reserve space for the bottom bar and the one permitted floating action without relying on unexplained magic padding.
+All four primary routes share the same shell geometry. Their first content starts below the 48 dp floating-action row; after scrolling, content may pass behind the overlay while uncovered regions remain visually and interactively open. Primary-page lists reserve space for the bottom bar and the one permitted FAB without unexplained magic padding.
 
 A secondary editor may pin its primary bottom action, but scroll content reserves the measured action-bar height plus navigation/IME insets. At 2.0× font scale and with the keyboard open, the last field, helper, error, and section heading must still scroll fully above the action.
+
+The app window is edge-to-edge with transparent status/navigation bars and without Android's forced navigation-bar contrast scrim. Page colour continues into the gesture region, and system icon/gesture-handle appearance follows the active light/dark theme.
 
 Use the 4/8/12/16/24/32 dp scale for layout rhythm. Add component tokens only for repeated anatomy such as page inset, card padding, avatar size, bottom content reserve, and icon size. Do not tokenise incidental measurements or replace Material component defaults without cause.
 
 ### Navigation and flows
 
-- Primary destinations are Tracks, Checklist, QR codes, and Me.
+- Bottom/rail destinations are Tracks, Checklist, and QR codes. The top-left avatar opens Me and replaces its former bottom/rail destination.
 - Primary navigation preserves tab, scroll, and workflow state.
 - System back and top-app-bar back must agree; predictive back is required for supported secondary routes.
 - Scrolling forms, asynchronous parsing, multi-step work, large lists, destructive administration, and state restoration belong on dedicated pages.
@@ -162,9 +227,9 @@ Use the 4/8/12/16/24/32 dp scale for layout rhythm. Add component tokens only fo
 
 ## Elevation & Depth
 
-Depth is primarily tonal. Routine cards are flat or low-tonal surfaces; selected/summary containers use a stronger semantic container; navigation, sheets, dialogs, and a dragged checklist item may rise above them.
+Depth is primarily tonal. Routine cards are flat or low-tonal surfaces; state differences prefer content, icons, and explicit semantic accents rather than tinting a whole card by default; navigation, sheets, dialogs, and a dragged checklist item may rise above them.
 
-Shadows are not the default separation mechanism. They may protect a floating/dragged element from a busy map but must not substitute for the surface-container ladder. Dark mode uses the same hierarchy through Night Fog tonal steps, not grey drop shadows.
+Shadows are not the default separation mechanism. They may protect a floating/dragged element from a busy map but must not substitute for the surface-container ladder. Dark mode uses the charcoal surface ladder, not grey drop shadows.
 
 Motion communicates state:
 
@@ -194,7 +259,7 @@ Journey-band nodes and connectors are reserved for genuinely ordered track conte
 
 ### App shell
 
-The shell owns the map background, top app bar, bottom bar or rail, inline device status, max-width content boundary, and primary action slot. Top and bottom chrome use their named translucent roles. The current destination is communicated by icon, label, and selected container—not colour alone.
+The shell owns the map background, scrimless floating action overlay, bottom bar or rail, device status, max-width content boundary, and primary action slot. Primary pages have no full-width top chrome and no page title. Secondary pages retain normal title/back app bars. The current bottom/rail destination is communicated by icon, label, and selected container—not colour alone.
 
 Device status distinguishes disconnected, saved locally, pending, syncing, synced, and retryable failure. Success may be transient. Failure remains visible until resolved or dismissed and exposes its full message.
 
@@ -206,6 +271,7 @@ Device status distinguishes disconnected, saved locally, pending, syncing, synce
 - Text Button: dialog and low-emphasis action.
 - Icon Button: familiar compact action with a precise content description; destructive actions are separated from routine actions.
 - FAB: at most one primary floating action per screen. On Tracks, Map and Place library use persistent secondary icon controls with a different size, tone, or elevation from Add.
+- A fixed bottom Save/Add action uses a transparent inset-owning host. Do not wrap it in a full-width tonal tray; the button itself provides the action emphasis while navigation-bar and IME clearance remain intact.
 
 Every action supports default, pressed, focused, disabled, loading when applicable, success/failure feedback, and a minimum 48 × 48 dp target.
 
@@ -223,6 +289,8 @@ Checklist groups are Pending and Completed. Do not show ordinal numbers or visib
 
 Forms live inside a contained surface with a maximum width of 720 dp. Labels remain visible while values are entered. Helper/error text sits next to its field and uses semantic colour plus text/icon, never colour alone. Tapping blank space may clear focus without consuming child gestures.
 
+Track add/edit app bars contain the page title only. Record mode, date/time, and precision are not pseudo-subtitles; precision is shown beside the coordinate group and may also remain on track cards.
+
 Real names, URLs, and identifiers have an explicit overflow policy. Editable long names preferably grow to two or three lines. If a field must remain single-line, it scrolls horizontally while focused, uses deliberate ellipsis while unfocused, and exposes the full value to accessibility. Silent hard clipping at a field edge is forbidden.
 
 Destructive restore/import shows a review summary before replacement. Long administration flows such as backup management use dedicated pages; the Me page may show a summary link.
@@ -233,15 +301,16 @@ Each data view defines loading, day-one empty, filtered empty, error, offline, a
 
 ### Favourite tiers
 
-Favourite tiers and Place library are signature parts of the Tracks experience, while their data migration, BLE/sync meaning, and compatibility still require separate approval. Timed long press is the explicitly accepted primary favourite interaction: it may remain hidden and novel without a persistent text entry or first-use hint. Once holding begins, tier feedback must be timely, controllable, and must not accidentally open editing. Place library itself remains visibly reachable from Tracks.
+Favourite tiers and Place library are signature parts of the Tracks experience, while their data migration, BLE/sync meaning, and compatibility still require separate approval. Timed long press is the explicitly accepted primary favourite interaction: it may remain hidden and novel without a persistent text entry or first-use hint. Once holding begins, tier feedback must be timely, controllable, and must not accidentally open editing. Tiers 1–3 use one candy-red progression—peach blush, candy pink, raspberry—in track cards, pulse fills/outlines, Place-library filters/cards/stars, and map stars; interaction neon green is not a favourite-tier colour. When a track first creates or joins a saved place, all unlinked historical tracks that match that place without ambiguity are linked immediately and inherit its tier. Place library itself remains visibly reachable from Tracks.
 
 ## Do's and Don'ts
 
 ### Do
 
-- **Do** preserve Dynamic Soft Candy, Night Fog, the city map, and the journey band.
+- **Do** preserve the warm-candy/charcoal-grey-pink system, city map, and journey band; keep UI-U3.5 explicitly `proposed` until acceptance.
 - **Do** use `MaterialTheme.colorScheme`, typography, and shapes as the semantic source of truth.
 - **Do** establish explicit `onSurface` content colour over transparent scaffolds.
+- **Do** keep system bars edge-to-edge and theme-adaptive, and keep fixed bottom action hosts transparent while preserving navigation/IME insets.
 - **Do** validate final composited colours, not only opaque token pairs.
 - **Do** test 1.0× and 2.0× fonts, light/dark themes, the full map zoom range, and Compact/Medium/Expanded widths.
 - **Do** keep Map and Place library persistently visible while Add remains the only primary action.
@@ -252,7 +321,10 @@ Favourite tiers and Place library are signature parts of the Tracks experience, 
 
 ### Don't
 
-- **Don't** restore the superseded pre-acceptance palette or replace Night Fog with pure black.
+- **Don't** add a full-width tonal Surface behind bottom Save/Add buttons merely to own insets.
+- **Don't** use an app-bar subtitle for status facts already represented by editable fields or nearby metadata.
+
+- **Don't** restore a superseded palette or let routine components inherit neon green merely through default primary/secondary roles.
 - **Don't** remove or redraw the city map as a generic gradient, glass wallpaper, or decorative illustration.
 - **Don't** stack multiple equal-weight FABs or hide Map and Place library in overflow.
 - **Don't** wrap track-card place names or let name length change card height.

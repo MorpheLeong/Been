@@ -205,7 +205,9 @@ provide reference material. Choose the entry that matches your task.
 
 | Resource | What you will find |
 | --- | --- |
-| [BugChecking Android design system](DESIGN.md) · [UI/UX audit](ux-audit-android-2026-10-28.md) | Normative Android visual/interaction rules and the current evidence-based audit backlog |
+| [BugChecking Android design system](DESIGN.md) · [UI/UX audit](ux-audit-android-2026-10-28.md) · [phased adjustment plan](android-ui-adjustment-roadmap-2026-10-28.md) | Android visual/interaction rules, audit evidence, implementation order, and acceptance gates |
+| [UI-U0 baseline and evidence](ui-u0-baseline-2026-10-29.md) | Current worktree, installed APK, device matrix, synthetic fixtures, and capture/map reproduction status |
+| [Personal application development standard](personal-app-development-standard.md) | Personal design preferences, engineering floors, rework lessons, development process, and future skill promotion path |
 | [Development](development/README.md) | AI workflow, engineering conventions, CI, and release guidance |
 | [AI skills](../skills/README.md) | Development, environment setup, builds, device testing, and debugging |
 | [Hardware](hardware-design/README.md) | Board facts, interface boundaries, acceptance checklists, and troubleshooting |

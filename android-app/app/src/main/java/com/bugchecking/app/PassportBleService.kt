@@ -15,8 +15,10 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.Geocoder
@@ -25,6 +27,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -34,7 +37,7 @@ class PassportBleService : Service() {
     private lateinit var db: PassportDb
     private var gatt: BluetoothGatt? = null
     private var scanning = false
-    private var reconnects = 0
+    private var retriesScheduled = 0
     private var revision = 0
     private var activeCheckIn = false
     private var activeRequestId = -1
@@ -46,6 +49,7 @@ class PassportBleService : Service() {
     private var stopping = false
     private var ready = false
     private var reconnectAllowed = false
+    private var lastState = "未连接"
     private var serviceDiscoveryStarted = false
     private var protocolDiscoveryRetries = 0
     private var negotiatedMtu = DEFAULT_ATT_MTU
@@ -74,6 +78,11 @@ class PassportBleService : Service() {
         scheduleReconnect()
     }
     private val reconnect = Runnable { if (!stopping && reconnectAllowed) connectOrScan() }
+    private val stateQueryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            sendStateBroadcast(STATE, lastState)
+        }
+    }
     private val connectionTimeout = Runnable {
         if (gatt == null || ready) return@Runnable
         closeConnection()
@@ -85,6 +94,12 @@ class PassportBleService : Service() {
         super.onCreate()
         db = PassportDb(this)
         createNotificationChannel()
+        ContextCompat.registerReceiver(
+            this,
+            stateQueryReceiver,
+            IntentFilter(ACTION_QUERY_STATE),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -99,7 +114,7 @@ class PassportBleService : Service() {
             ACTION_START -> {
                 stopping = false
                 reconnectAllowed = true
-                reconnects = 0
+                retriesScheduled = 0
                 syncWhenConnected = false
                 startForeground(NOTIFICATION_ID, notification("正在连接 BugChecking"))
                 if (ready) broadcast(STATE, "已安全连接，等待 Passport 指令") else connectOrScan()
@@ -107,7 +122,7 @@ class PassportBleService : Service() {
             ACTION_SYNC -> {
                 stopping = false
                 reconnectAllowed = true
-                reconnects = 0
+                retriesScheduled = 0
                 syncWhenConnected = true
                 startForeground(NOTIFICATION_ID, notification("正在连接 BugChecking"))
                 if (ready) {
@@ -118,7 +133,7 @@ class PassportBleService : Service() {
             ACTION_TRACK_NAME_SYNC -> {
                 stopping = false
                 reconnectAllowed = true
-                reconnects = 0
+                retriesScheduled = 0
                 startForeground(NOTIFICATION_ID, notification("正在同步地点名称"))
                 val trackId = intent.getLongExtra(EXTRA_TRACK_ID, -1L).takeIf { it > 0 }
                 if (ready) syncTrackNames(trackId) else connectOrScan()
@@ -141,6 +156,7 @@ class PassportBleService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
         stopping = true
+        runCatching { unregisterReceiver(stateQueryReceiver) }
         closeConnection()
         syncExecutor.shutdownNow()
         super.onDestroy()
@@ -237,6 +253,7 @@ class PassportBleService : Service() {
                 }
                 catch (_: SecurityException) { broadcast(STATE, "蓝牙连接权限被撤销"); closeConnection() }
             } else {
+                val wasReady = ready
                 if (gatt !== g) {
                     try { g.close() }
                     catch (_: SecurityException) { }
@@ -249,6 +266,7 @@ class PassportBleService : Service() {
                 try { g.close() }
                 catch (_: SecurityException) { broadcast(STATE, "蓝牙连接权限被撤销") }
                 if (reconnectAllowed) {
+                    if (wasReady) retriesScheduled = 0
                     broadcast(STATE, "Passport 已断开，准备重连")
                     scheduleReconnect()
                 } else {
@@ -296,7 +314,7 @@ class PassportBleService : Service() {
                 main.removeCallbacks(connectionTimeout)
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     ready = true
-                    reconnects = 0
+                    retriesScheduled = 0
                     broadcast(STATE, "已安全连接，等待 Passport 指令")
                     if (syncWhenConnected) syncSnapshot() else syncClock()
                     syncTrackNames()
@@ -735,11 +753,15 @@ class PassportBleService : Service() {
 
     private fun scheduleReconnect() {
         if (!reconnectAllowed || stopping || gatt != null || scanning) return
-        // Issue the first reconnect before vendor background-freeze policies can
-        // suspend this process. Later failures still back off to avoid a busy loop.
-        val delay = if (reconnects == 0) 0L
-            else (1_000L shl (reconnects - 1).coerceAtMost(6)).coerceAtMost(60_000L)
-        reconnects = (reconnects + 1).coerceAtMost(7)
+        val delay = reconnectDelayMs(retriesScheduled)
+        if (delay == null) {
+            reconnectAllowed = false
+            broadcast(STATE, "无法连接 BugChecking，请点连接重试")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
+        retriesScheduled++
         main.removeCallbacks(reconnect)
         main.postDelayed(reconnect, delay)
     }
@@ -800,9 +822,13 @@ class PassportBleService : Service() {
         }
     }
     private fun broadcast(action: String, state: String, dataChanged: Boolean = false) {
+        lastState = state
+        sendStateBroadcast(action, state, dataChanged)
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(state))
+    }
+    private fun sendStateBroadcast(action: String, state: String, dataChanged: Boolean = false) {
         sendBroadcast(Intent(action).setPackage(packageName).putExtra(EXTRA_STATE, state)
             .putExtra(EXTRA_CONNECTED, ready).putExtra(EXTRA_DATA_CHANGED, dataChanged))
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(state))
     }
     private fun createNotificationChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -822,6 +848,7 @@ class PassportBleService : Service() {
         const val ACTION_STOP = "com.bugchecking.app.STOP_BLE"
         const val ACTION_SYNC = "com.bugchecking.app.SYNC"
         const val ACTION_TRACK_NAME_SYNC = "com.bugchecking.app.SYNC_TRACK_NAME"
+        const val ACTION_QUERY_STATE = "com.bugchecking.app.QUERY_BLE_STATE"
         const val STATE = "com.bugchecking.app.BLE_STATE"
         const val EXTRA_STATE = "state"
         const val EXTRA_CONNECTED = "connected"

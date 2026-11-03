@@ -1,7 +1,9 @@
 package com.bugchecking.app
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -32,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -81,6 +84,7 @@ import kotlin.math.hypot
 internal fun FavoriteTrackCard(
     track: TrackPoint,
     modifier: Modifier = Modifier,
+    focusHighlighted: Boolean = false,
     onClick: () -> Unit,
     onFavorite: (Int) -> Boolean,
     content: @Composable (contentColor: Color, displayedTier: Int) -> Unit,
@@ -91,6 +95,12 @@ internal fun FavoriteTrackCard(
     val haptic = LocalHapticFeedback.current
     val viewConfiguration = LocalViewConfiguration.current
     val density = LocalDensity.current
+    val focusOutlineAlpha by animateFloatAsState(
+        targetValue = if (focusHighlighted) 1f else 0f,
+        animationSpec = tween(if (focusHighlighted) 180 else 450),
+        label = "track focus outline",
+    )
+    val focusOutlineColor = MaterialTheme.colorScheme.primary.copy(alpha = focusOutlineAlpha)
     val pulseProgress = remember { Animatable(0f) }
     val persistedFavoriteTier by rememberUpdatedState(track.favoriteTier)
     val favoriteHandler by rememberUpdatedState(onFavorite)
@@ -174,7 +184,8 @@ internal fun FavoriteTrackCard(
 
     val displayedTier = if (gestureTier > 0) gestureTier else settledTier
     val settledColor = trackFavoriteContainerColor(settledTier)
-    val activePulseColor = trackFavoriteContainerColor(pulseTier)
+    val activePulseColor = trackFavoritePulseColor(pulseTier)
+    val favoriteAccentColor = trackFavoriteAccentColor(displayedTier)
     val contentColor = trackFavoriteContentColor(displayedTier)
     val starDescription = trackFavoriteList(track.favoriteTier)?.let { "${it.stars} ${it.name}" } ?: "未收藏"
     val actions = buildList {
@@ -188,6 +199,7 @@ internal fun FavoriteTrackCard(
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = contentColor),
         modifier = modifier
+            .border(2.dp, focusOutlineColor, MaterialTheme.shapes.medium)
             .semantics {
                 stateDescription = starDescription
                 customActions = actions
@@ -214,7 +226,7 @@ internal fun FavoriteTrackCard(
                         val radius = maxRadius * pulseProgress.value
                         drawCircle(activePulseColor, radius, pressOrigin)
                         drawCircle(
-                            contentColor.copy(alpha = 0.28f * (1f - pulseProgress.value)),
+                            favoriteAccentColor.copy(alpha = 0.72f * (1f - pulseProgress.value)),
                             radius,
                             pressOrigin,
                             style = Stroke(width = strokeWidth),
@@ -227,7 +239,7 @@ internal fun FavoriteTrackCard(
             content(contentColor, displayedTier)
             FavoriteTierStars(
                 tier = displayedTier,
-                color = contentColor,
+                color = favoriteAccentColor,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = PassportSpacing.md, bottom = PassportSpacing.md),
@@ -262,10 +274,12 @@ internal fun FavoriteTierDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
                 trackFavoriteLists.forEach { list ->
-                    FavoriteTierChoice(list.name, selectedTier == list.tier) { selectedTier = list.tier }
+                    FavoriteTierChoice(list.name, list.tier, selectedTier == list.tier) {
+                        selectedTier = list.tier
+                    }
                 }
                 if (currentTier > 0) {
-                    FavoriteTierChoice("取消收藏", selectedTier == 0) { selectedTier = 0 }
+                    FavoriteTierChoice("取消收藏", 0, selectedTier == 0) { selectedTier = 0 }
                 }
             }
         },
@@ -275,14 +289,15 @@ internal fun FavoriteTierDialog(
 }
 
 @Composable
-private fun FavoriteTierChoice(name: String, selected: Boolean, onClick: () -> Unit) {
+private fun FavoriteTierChoice(name: String, tier: Int, selected: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = PassportSpacing.minTouchTarget)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected, onClick)
-        Text(name, style = MaterialTheme.typography.bodyLarge)
+        Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        FavoriteTierStars(tier = tier, color = trackFavoriteAccentColor(tier))
     }
 }
 
@@ -320,6 +335,10 @@ internal fun PlaceLibraryScreen(
                         selected = filterMask and bit != 0,
                         onClick = { filterMask = filterMask xor bit },
                         label = { Text("${list.stars} ${list.name}") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = trackFavoriteContainerColor(list.tier),
+                            selectedLabelColor = trackFavoriteContentColor(list.tier),
+                        ),
                     )
                 }
             }
@@ -345,7 +364,22 @@ internal fun PlaceLibraryScreen(
                             },
                         ) {
                             Column(Modifier.padding(PassportSpacing.md)) {
-                                Text(place.name, style = MaterialTheme.typography.titleMedium)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        place.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    FavoriteTierStars(
+                                        tier = place.favoriteTier,
+                                        color = trackFavoriteAccentColor(place.favoriteTier),
+                                        modifier = Modifier.padding(start = PassportSpacing.sm),
+                                    )
+                                }
                                 Text(
                                     buildString {
                                         append("到访 ${place.visitCount} 次")

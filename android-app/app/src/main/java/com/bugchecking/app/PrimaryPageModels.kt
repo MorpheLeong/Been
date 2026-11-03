@@ -23,6 +23,17 @@ internal fun resolveDeviceActionState(
     else -> DeviceActionState.DISCONNECTED
 }
 
+internal fun deviceCapsuleMaxWidthDp(
+    contentWidthDp: Float,
+    hasCenteredActions: Boolean,
+    preferredMaxWidthDp: Float,
+): Float {
+    if (!hasCenteredActions) return preferredMaxWidthDp.coerceAtLeast(48f)
+    val centeredActionsWidthDp = 96f
+    val collisionSafeWidth = (contentWidthDp - centeredActionsWidthDp) / 2f - 8f
+    return collisionSafeWidth.coerceIn(48f, preferredMaxWidthDp.coerceAtLeast(48f))
+}
+
 data class ManualTrackDraft(
     val name: String,
     val latitude: Double,
@@ -44,8 +55,11 @@ internal fun ManualTrackDraft.requireValid() {
     require(time > 0L) { "请选择有效时间" }
 }
 
+internal fun trackPrecisionLabel(accuracy: Float): String? =
+    accuracy.takeIf { it > 0f }?.let { "精度 ${it.toInt()}\u00A0m" }
+
 internal fun trackAccuracyLabel(track: TrackPoint): String =
-    if (track.accuracy > 0f) "精度 ${track.accuracy.toInt()} m" else "手动坐标"
+    trackPrecisionLabel(track.accuracy) ?: "手动坐标"
 
 internal fun checklistProgress(completed: Int, total: Int): Float =
     if (total <= 0) 0f else (completed.toFloat() / total).coerceIn(0f, 1f)
