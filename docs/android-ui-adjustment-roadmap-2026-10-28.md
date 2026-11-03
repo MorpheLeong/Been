@@ -67,16 +67,16 @@ This is the single implementation index. Phase sections explain the intent; `DES
 | Kind | Candidate IDs/contracts | Rule class | Phase | Current state |
 | --- | --- | --- | --- | --- |
 | UI-U1 content/surface | `content/on-image-surface`, `surface/form-opaque` | B | UI-U1 | `accepted` |
-| Later content/surface | `surface/chrome`, `surface/list-card`, `surface/summary`, `surface/selected`, `surface/favourite-tier-*`, `ink/on-favourite-tier-*` | B | UI-U4 | `proposed` |
+| UI-U4 content/surface | `surface/chrome`, `surface/list-card`, `surface/summary`, `surface/selected`, `surface/favourite-tier-*`, `ink/on-favourite-tier-*` | B | UI-U4 | `accepted` |
 | UI-U1 layout | `layout/editor-bottom-reserve`, `layout/safe-drawing-bottom` | B | UI-U1 | `accepted` |
 | UI-U3 layout | `layout/track-action-gap`, `layout/track-action-safe-reserve` | B | UI-U3 | `accepted` |
-| Pre-UI-U4 primary shell | `layout/primary-floating-actions`, `navigation/profile-avatar`, `motion/device-capsule` | B | UI-U4 prerequisite increment | `proposed` |
+| UI-U4 primary shell | `layout/primary-floating-actions`, `navigation/profile-avatar`, `motion/device-capsule` | B | UI-U4 | `accepted` |
 | UI-U1 map attribution | `map/attribution-scrim` | B | UI-U1 | `accepted` |
 | Map geometry | `map/route-line-color`, `map/route-line-width`, `map/point-size`, `map/point-outline-width`, `map/favourite-point-colors` | B | UI-U2 | `accepted` |
 | Map clustering | `map/cluster-radius`, `map/cluster-zoom-thresholds` | B | post-UI-U2 compatibility work | `proposed` |
 | UI-U2 motion | `motion/track-focus-cue` | B | UI-U2 | `accepted` |
 | UI-U3 action tokens | `action/track-primary-fab`, `action/track-signature-icon` | B | UI-U3 | `accepted` |
-| Later action/motion tokens | `action/destructive-icon`, `motion/completion-spring`, `motion/favourite-hold-stage` | B | UI-U4 | `proposed` |
+| UI-U4 action/motion tokens | `action/destructive-icon`, `motion/completion-spring`, `motion/favourite-hold-stage` | B | UI-U4 | `accepted` |
 | Component contracts | `track-card/title-max-lines = 1`, `track-card/title-overflow = ellipsis` | B | UI-U3 | `accepted` |
 | Architecture contract | Geographic coordinates belong to renderer sources/layers; UI code does not reimplement projection | E | UI-U2 | `accepted` |
 
@@ -128,10 +128,12 @@ Stage status: `ACCEPTED`. On 2026-10-30 the owner explicitly confirmed “UI-U3 
 
 ### UI-U4 — Cross-page consistency and tokens
 
-Before UI-U4, the owner approved a separate primary-shell increment. Its current implementation removes the solid top app bar and primary-page titles, moves Me from bottom/rail navigation to a 48 dp circular avatar, keeps Map/Place library centred on Tracks, and places the device action in a neutral right-anchored expanding capsule. The control row sits 8 dp below the safe top inset; Tracks, Checklist, and QR share a 64 dp transparent first-content breathing region and may scroll behind the scrimless overlay. Me opens as an independent secondary page with no bottom/rail navigation and a top-left Back action. Narrow layouts ellipsise status text rather than moving or hiding the centred signature actions. This increment remains `proposed` until PLZ110 light/dark, 1.0×/2.0×, navigation-mode, and all device-state checks pass; it does not mark UI-U4 complete.
+Stage status: `ACCEPTED`. On 2026-11-04 the owner explicitly confirmed “UI-U4 accepted”. Token guard, unit tests, lint, APK assembly, and `git diff --check` passed. PLZ110 evidence covers light/dark, gesture/three-button navigation, IME, 16 dp (56 px) floating-edge alignment, the 29.7 dp concentric navigation radius, circular Add, and independent-page corner actions. UI-U5 is now unlocked but has not started or been accepted.
 
-- Define chrome/list/summary/selected/favourite/form surface roles; validate final-composite favourite legibility; preserve diagnostic sync errors; reduce QR action competition without adding labels; consolidate only repeated stable values.
-- Acceptance: roles resolve to the same tokens everywhere; action hierarchy is consistent; final composites are measured on the lightest/darkest map samples and every surface role (normal text >=4.5:1, large/UI boundaries >=3:1); destructive QR action is separated without requiring labels; inventory names owners and call sites.
+Before UI-U4, the owner approved a separate primary-shell increment. Its implementation removes the solid top app bar and primary-page titles, moves Me from bottom/rail navigation to a circular avatar, keeps Map/Place library centred on Tracks, and places the device action in a neutral right-anchored expanding capsule. The control row clears the safe top inset; initial Tracks, Checklist, and QR content clears it through scroll-content padding, while scrolled content may pass behind uncovered regions. Me opens as an independent secondary page with no bottom/rail navigation and a top-left Back action. Narrow layouts ellipsise status text rather than moving or hiding the centred signature actions. Floating controls/navigation use explicit shadow elevation without adding a solid chrome band. This increment was accepted with UI-U4 on 2026-11-04.
+
+- Define chrome/list/summary/selected/favourite/form surface roles; validate final-composite favourite legibility; preserve diagnostic sync errors; reduce QR action competition without adding labels; consolidate only repeated stable values. The current worktree implements runtime palette/shape/border/component tokens, a 64 dp Compact floating navigation + 64 dp Add group, and titleless four-corner independent pages. Android 12+ reads the window radius (PLZ110: 160 px, about 45.7 dp); pre-31 falls back to 16 dp. Large shells retain that radius, while fields use 16 dp and ordinary text buttons use 24 dp. Card content uses a curve-safe horizontal inset of `max(24 dp, screen radius / 2)`. `verifyPassportUiTokens` is wired into Gradle `check` and rejects local rounded shapes or generic theme-shape bypasses. Automation, the PLZ110 matrix, and explicit owner acceptance make this implementation `accepted` as of 2026-11-04.
+- Acceptance: roles resolve to the same tokens everywhere; action hierarchy is consistent; final composites are measured on the lightest/darkest map samples and every surface role (normal text >=4.5:1, large/UI boundaries >=3:1); destructive QR action is separated without requiring labels; inventory names owners and call sites. Cards and dialogs/sheets retain the runtime screen radius; PLZ110 floating navigation uses the concentric `45.7 - 16 = 29.7 dp` radius, Add is explicitly circular, and status/signature/selection controls are capsules. Fields stay 16 dp and text buttons stay 24 dp. Top, bottom, and independent-page corner controls align to the 16 dp content edge and clear gesture/three-button navigation and IME at 1.0×/2.0×.
 - Candidate tokens: `surface/chrome`, `surface/list-card`, `surface/summary`, `surface/selected`, `surface/favourite-tier-*`, `ink/on-favourite-tier-*`, `action/destructive-icon`, `motion/completion-spring`, and `motion/favourite-hold-stage`.
 
 ### UI-U5 — Platform, final device review, and personal standard

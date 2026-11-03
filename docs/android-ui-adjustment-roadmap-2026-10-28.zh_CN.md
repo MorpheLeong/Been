@@ -81,16 +81,16 @@ owner / call sites / evidence / supersedes
 | 类别 | 候选 ID／契约 | 规则类 | 所属阶段 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | UI-U1 内容与表面 | `content/on-image-surface`、`surface/form-opaque` | B | UI-U1 | `accepted` |
-| 后续内容与表面 | `surface/chrome`、`surface/list-card`、`surface/summary`、`surface/selected`、`surface/favourite-tier-*`、`ink/on-favourite-tier-*` | B | UI-U4 | `proposed` |
+| UI-U4 内容与表面 | `surface/chrome`、`surface/list-card`、`surface/summary`、`surface/selected`、`surface/favourite-tier-*`、`ink/on-favourite-tier-*` | B | UI-U4 | `accepted` |
 | UI-U1 布局 | `layout/editor-bottom-reserve`、`layout/safe-drawing-bottom` | B | UI-U1 | `accepted` |
 | UI-U3 布局 | `layout/track-action-gap`、`layout/track-action-safe-reserve` | B | UI-U3 | `accepted` |
-| UI-U4 前置一级外壳 | `layout/primary-floating-actions`、`navigation/profile-avatar`、`motion/device-capsule` | B | UI-U4 前置增量 | `proposed` |
+| UI-U4 一级外壳 | `layout/primary-floating-actions`、`navigation/profile-avatar`、`motion/device-capsule` | B | UI-U4 | `accepted` |
 | UI-U1 地图署名 | `map/attribution-scrim` | B | UI-U1 | `accepted` |
 | 地图几何 | `map/route-line-color`、`map/route-line-width`、`map/point-size`、`map/point-outline-width`、`map/favourite-point-colors` | B | UI-U2 | `accepted` |
 | 地图聚类 | `map/cluster-radius`、`map/cluster-zoom-thresholds` | B | UI-U2 后续兼容性工作 | `proposed` |
 | 动作与动效 token | `motion/track-focus-cue` | B | UI-U2 | `accepted` |
 | UI-U3 动作 token | `action/track-primary-fab`、`action/track-signature-icon` | B | UI-U3 | `accepted` |
-| 后续动作与动效 token | `action/destructive-icon`、`motion/completion-spring`、`motion/favourite-hold-stage` | B | UI-U4 | `proposed` |
+| UI-U4 动作与动效 token | `action/destructive-icon`、`motion/completion-spring`、`motion/favourite-hold-stage` | B | UI-U4 | `accepted` |
 | 组件契约 | `track-card/title-max-lines = 1`、`track-card/title-overflow = ellipsis` | B | UI-U3 | `accepted` |
 | 架构契约 | 地理坐标由 renderer source/layer 持有，UI 不自行重算投影 | E | UI-U2 | `accepted` |
 
@@ -223,7 +223,9 @@ UI-U0 没有产生可晋级的视觉 token；候选 token 保持 `proposed`。�
 
 ### UI-U4：跨页一致性与 token 收敛
 
-UI-U4 之前，所有者批准了独立的一级外壳增量。当前实现移除实体顶栏与一级页面标题，把“设备与我”从底栏／rail 迁移到 48 dp 圆形头像，在轨迹页顶部中央保留地图／地点库，并将设备入口放入中性、右锚定、可展开的胶囊。操作行位于 safe top inset 下方 8 dp；轨迹、清单、二维码首屏统一增加 64 dp 透明呼吸区，滚动后仍可经过无底色悬浮层后方。“设备与我”作为独立二级页面打开，不显示底栏／rail，并在左上角提供返回按钮。窄屏优先省略状态文字，不移动或隐藏中央特色入口。本增量在 PLZ110 浅／深色、1.0×／2.0×、导航模式及全部设备状态通过前保持 `proposed`，且不代表 UI-U4 完成。
+阶段状态：`ACCEPTED`。2026-11-04 所有者明确确认“UI-U4 验收通过”。token 门禁、单测、lint、APK 构建和 `git diff --check` 均通过；PLZ110 已覆盖浅色／深色、手势／三键导航、IME、16 dp（56 px）悬浮边界对齐、29.7 dp 同心底栏圆角、圆形 FAB 与独立页面四角动作。UI-U5 现已解锁，但尚未开始或验收。
+
+UI-U4 之前，所有者批准了独立的一级外壳增量。当前实现移除实体顶栏与一级页面标题，把“设备与我”从底栏／rail 迁移到圆形头像，在轨迹页顶部中央保留地图／地点库，并将设备入口放入中性、右锚定、可展开的胶囊。操作行位于 safe top inset 下方；轨迹、清单、二维码的首屏内容通过滚动 content padding 避让操作行，滚动内容仍可经过控件后方未被实体遮挡的区域。“设备与我”作为独立二级页面打开，不显示底栏／rail，并在左上角提供返回按钮。窄屏优先省略状态文字，不移动或隐藏中央特色入口。悬浮按钮／底栏使用明确阴影层级，但不新增实体 chrome。本增量已随 UI-U4 于 2026-11-04 验收。
 
 **实施内容**
 
@@ -232,6 +234,9 @@ UI-U4 之前，所有者批准了独立的一级外壳增量。当前实现移�
 - 同步失败保持可诊断，不要求增加常驻说明文案。
 - QR 卡保留图标优先，降低展示、收藏、编辑、删除之间的视觉竞争。
 - 只提取重复且稳定的 tokens，删除重复 magic values；不 token 化所有数字。
+- 当前工作区已实现运行时 `PassportPalette`、语义形状／边界／组件 tokens、Compact 64 dp 悬浮底栏 + 64 dp Add、以及无标题四角独立页面外壳。Android 12+ 读取窗口圆角，PLZ110 报告 160 px（约 45.7 dp）；API 31 以下回退 16 dp。大型外壳保留该圆角，字段固定 16 dp，普通文字按钮固定 24 dp；卡片水平内容安全距离为 `max(24 dp, 屏幕圆角 / 2)`。
+- 独立页面动作映射为：添加轨迹返回 + 确认；编辑轨迹返回 + 收藏 + 确认 + 删除；清单导入返回 + 文件 + 下一步／确认；二维码编辑返回 + 确认；地图返回 + 重新适配；地点库／二维码展示仅返回；场所详情／头像裁切返回 + 确认。
+- `verifyPassportUiTokens` 已接入 Gradle `check`，阻止页面代码新增原始颜色、局部圆角、通用 theme shape 绕过和数值边界。自动化编译、token 守卫、单测与 PLZ110 真机矩阵均已通过；所有者于 2026-11-04 将 UI-U4 标记为 `accepted`，本阶段规则可写入项目记忆。
 
 **验收标准**
 
@@ -240,6 +245,7 @@ UI-U4 之前，所有者批准了独立的一级外壳增量。当前实现移�
 - 在固定动态／静态浅深主题截图中，对地图背景最亮、最暗样本和每种 surface role 的最终合成色测量：普通文字 >=4.5:1，大字和 UI 边界 >=3:1；这不改变隐藏收藏的发现性取舍。
 - QR 删除与日常动作有清楚的空间或色调隔离，仍不要求文字标签。
 - `PassportSpacing`、shape、type roles 与组件 token 清单有引用位置和所有者。
+- PLZ110 上卡片与 dialog／sheet 使用 45.7 dp 运行时圆角；悬浮底栏按 `45.7 - 16 = 29.7 dp` 形成同心圆角，64 dp Add 明确为圆形，状态／特色入口及导航选中项为胶囊。字段保持 16 dp，普通文字按钮保持 24 dp。顶部、底部和独立页四角操作统一贴齐 16 dp 内容极值，并在手势／三键、IME、1.0×／2.0×下无裁切、遮挡或误触。
 
 **可晋级 token**
 

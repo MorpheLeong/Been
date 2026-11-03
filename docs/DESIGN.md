@@ -107,7 +107,7 @@ These BugChecking project contracts passed the UI-U2 PLZ110 and owner acceptance
 | ID | Accepted resolution |
 | --- | --- |
 | `action/track-primary-fab` | Add Track is the only FAB on Tracks and uses the standard Material 3 primary FAB role. Map and Place library never reuse its complete size, tone, and elevation combination. |
-| `action/track-signature-icon` | Map and Place library share one persistent secondary action strip using `secondaryContainer` / `onSecondaryContainer`, the 16 dp large shape, 1 dp tonal elevation, and one 48 × 48 dp IconButton target per action. |
+| `action/track-signature-icon` | Map and Place library share one persistent secondary action strip using `secondaryContainer` / `onSecondaryContainer`, 1 dp tonal elevation, and one 48 × 48 dp IconButton target per action. Its accepted UI-U3 16 dp shape is superseded by UI-U4's accepted semantic shape; action hierarchy and target size are unchanged. |
 | `layout/track-action-gap` | The signature strip starts 8 dp below the Tracks content edge; it occupies layout space rather than floating over cards. |
 | `layout/track-action-safe-reserve` | The Tracks list reserves 104 dp at the bottom so its final card can clear the sole primary FAB; the signature strip requires no overlay reserve because it is outside the scroll viewport. |
 | `track-card/title-max-lines` | Track-card place names use exactly one line. |
@@ -115,11 +115,11 @@ These BugChecking project contracts passed the UI-U2 PLZ110 and owner acceptance
 
 These BugChecking project contracts passed the PLZ110 1.0× / 2.0× font matrix and owner acceptance on 2026-10-30. UI-U4 is unlocked; these rules remain project-scoped rather than becoming a cross-project personal preference.
 
-The accepted product intent—Add as the sole FAB, Map/Place library persistently visible, and equal-height one-line cards—remains binding. The earlier in-flow placement of the signature strip is superseded in the current implementation by the pending scrimless-shell contract below; that new geometry is not accepted until its own device review.
+The accepted product intent—Add as the sole FAB, Map/Place library persistently visible, and equal-height one-line cards—remains binding. The earlier in-flow placement of the signature strip is superseded by the scrimless floating-shell contract below, which passed owner acceptance with UI-U4 on 2026-11-04.
 
-### Current UI-U3.5 implementation rules (pending device acceptance)
+### Accepted UI-U3.5 / UI-U4 colour and primary-shell rules
 
-UI-U3.5 uses a fixed brand palette and no longer derives colour from Android wallpaper. The following rules are current implementation contracts; they may become `accepted` or enter long-term memory only after the device matrix and explicit owner acceptance:
+UI-U3.5 uses a fixed brand palette and no longer derives colour from Android wallpaper. The following rules entered the UI-U4 device matrix and received explicit owner acceptance with UI-U4 on 2026-11-04. Their state is BugChecking-project `accepted`; they do not automatically become cross-project personal preferences:
 
 | ID | Current definition |
 | --- | --- |
@@ -132,7 +132,7 @@ UI-U3.5 uses a fixed brand palette and no longer derives colour from Android wal
 | `card/checklist-progress` | The completion card uses the normal card surface; progress uses the journey role and a neutral track. |
 | `card/qr-star` | Every QR card uses the normal card surface; only the active star retains neon green. Inactive star, Edit, and Delete remain neutral. |
 | `action/profile-backup-neutral` | Change avatar, Save profile, the volume slider, Change, and Back up now remain neutral rather than neon green. |
-| `layout/primary-floating-actions` | Primary pages have no solid top app bar or page title. A scrimless overlay aligns 48 dp Profile, signature, and device controls 8 dp below the safe top inset; uncovered regions never intercept content. Tracks, Checklist, and QR begin after a shared 64 dp transparent breathing region and may scroll behind it. |
+| `layout/primary-floating-actions` | Primary pages have no solid top app bar or page title. A scrimless overlay aligns 48 dp Profile, signature, and device controls 8 dp below the safe top inset; uncovered regions neither obscure nor intercept content. Initial content clears controls through list content padding, while scrolled content may still pass behind them. |
 | `navigation/profile-avatar` | Compact/rail navigation contains Tracks, Checklist, and QR. The circular avatar opens Me as an independent secondary page; Me hides bottom/rail navigation and replaces the avatar with a top-left Back action. |
 | `motion/device-capsule` | The neutral 48 dp device control keeps its right edge fixed. Status text expands left, enters in 320 ms, exits in 260 ms, ellipsises before the centred signature strip, and exposes the full message through a polite live region. |
 
@@ -204,9 +204,9 @@ Track-card place names are an explicit exception: keep one line with trailing el
 - **Expanded (>=840 dp):** NavigationRail plus list-detail or supporting-pane layout where context benefits. Do not merely centre a phone-width page when a second pane improves the task.
 - Foldables must avoid placing primary interaction across a hinge. Expanded support is not considered complete without hinge-aware verification.
 
-All four primary routes share the same shell geometry. Their first content starts below the 48 dp floating-action row; after scrolling, content may pass behind the overlay while uncovered regions remain visually and interactively open. Primary-page lists reserve space for the bottom bar and the one permitted FAB without unexplained magic padding.
+Primary routes share one shell geometry. Initial content clears the floating top-action row through the scrolling container's own content padding; after scrolling, content remains visible in every uncovered transparent area and may pass behind the buttons. The shell must not create solid top/bottom bands with whole-viewport padding. Compact uses a 64 dp floating bottom group: a three-destination custom compact navigation container takes the remaining width, a 64 × 64 dp Add control sits to its right, and the gap is 8 dp. Top floating entries, the bottom floating group, and independent-page corner actions share a fixed 16 dp content-edge inset in addition to system `safeDrawing`, aligning avatar/back with date-heading/navigation edges and device status with track-card/Add edges. On PLZ110 the physical container edge sits about 56 px from the screen; outward shadow is excluded from alignment. The bottom group sits 12 dp above navigation insets. The navigation shell has 4 dp inner padding; each of its three equal-width items is 56 dp high, uses a 24 dp icon and 2 dp icon-label gap, and wraps icon plus one-line label in the selected container. Lists reserve only enough trailing space for the actual floating group, never a full-width bottom bar.
 
-A secondary editor may pin its primary bottom action, but scroll content reserves the measured action-bar height plus navigation/IME insets. At 2.0× font scale and with the keyboard open, the last field, helper, error, and section heading must still scroll fully above the action.
+Independent pages have no title or solid app bar. A transparent four-corner layer assigns Back at top-start, contextual action at top-end, confirm/next at bottom-start, and destructive action at bottom-end; a corner is absent when it has no action. Controls are 48 dp circles and bottom controls clear navigation/IME insets. The page canvas always fills the window; initial clearance belongs to scrolling content padding, and scrolled content may enter every transparent gap and pass behind the controls, while only the control surfaces obscure and intercept input. At 2.0× font scale and with the keyboard open, the last field, helper, error, and section heading still scroll above them.
 
 The app window is edge-to-edge with transparent status/navigation bars and without Android's forced navigation-bar contrast scrim. Page colour continues into the gesture region, and system icon/gesture-handle appearance follows the active light/dark theme.
 
@@ -229,7 +229,7 @@ Use the 4/8/12/16/24/32 dp scale for layout rhythm. Add component tokens only fo
 
 Depth is primarily tonal. Routine cards are flat or low-tonal surfaces; state differences prefer content, icons, and explicit semantic accents rather than tinting a whole card by default; navigation, sheets, dialogs, and a dragged checklist item may rise above them.
 
-Shadows are not the default separation mechanism. They may protect a floating/dragged element from a busy map but must not substitute for the surface-container ladder. Dark mode uses the charcoal surface ladder, not grey drop shadows.
+Shadows are not the default separation mechanism. They may protect a floating/dragged element from a busy map but must not substitute for the surface-container ladder. Top/corner floating controls and floating navigation use 4 dp shadow elevation; the FAB uses 6 dp at rest and 8 dp when pressed/focused. In dark mode these floating controls share a 1 dp light rim derived from low-alpha `onSurface`, so they remain legible while moving over map content. Light mode suppresses that rim and relies on container-tone separation plus shadow for cleaner, more translucent edges. Floating navigation may own a distinct navigation-container tone, but that tone must not spread to routine cards. Routine cards receive no extra shadow, and dark mode still relies primarily on the charcoal surface ladder.
 
 Motion communicates state:
 
@@ -243,13 +243,16 @@ Motion communicates state:
 
 ## Shapes
 
-The shape language is softly rounded and systematic:
+Shape uses a semantic hierarchy anchored by the device screen radius:
 
-- Small (8 dp): compact controls and fields where the Material component does not supply its own shape.
-- Medium (12 dp): routine cards and list containers.
-- Large (16 dp): prominent cards, avatar frames, and elevated containers.
-- Extra large (28 dp): dialogs, sheets, and large expressive containers.
-- Full/pill: buttons, chips, progress tracks, and circular nodes only where their component semantics call for it.
+- Android 12+ uses the smallest non-zero current-window corner radius converted to dp; a square display uses 0 dp and older Android falls back to 16 dp.
+- `cardShape` uses the runtime screen radius for cards, dialogs, and sheets. `fieldShape` is fixed at 16 dp for text/read-only fields and selectors, and `buttonShape` is fixed at 24 dp for ordinary text buttons. Floating navigation uses the concentric radius `clamp(screen radius - 16 dp, 16 dp, height / 2)`. The 64 dp Add control, avatar/back, and corner actions are explicitly circular; device status, the Map/Place-library group, and navigation selection are half-height capsules.
+- `MaterialTheme.shapes` maps small roles to fields, medium to buttons, and large roles to card shells. Page code must call the matching semantic token/shared component and may not construct local rounded shapes or bypass tokens through a generic theme shape.
+- Standard card content uses 24 dp vertical padding and horizontal padding `max(24 dp, screen radius / 2)`; compact list cards use the same horizontal safety inset with 16 dp vertical padding.
+- Circular avatars, corner actions, and journey nodes remain `CircleShape`; chips and progress tracks use the semantic full token.
+- `PassportPalette` may be replaced at runtime for future colour customisation. Shape, border, and component dimensions are not user-colour settings.
+
+This UI-U4 shape hierarchy and its code guard received explicit owner acceptance on 2026-11-04 and are `accepted`. Evidence includes PLZ110 light/dark, gesture/three-button navigation, IME clearance, 16 dp (56 px) edge alignment, the 29.7 dp concentric navigation radius, circular Add, plus passing token guard, unit tests, lint, APK assembly, and `git diff --check`.
 
 Journey-band nodes and connectors are reserved for genuinely ordered track content. Do not reuse them as decoration, badges, or generic list bullets.
 
@@ -259,7 +262,7 @@ Journey-band nodes and connectors are reserved for genuinely ordered track conte
 
 ### App shell
 
-The shell owns the map background, scrimless floating action overlay, bottom bar or rail, device status, max-width content boundary, and primary action slot. Primary pages have no full-width top chrome and no page title. Secondary pages retain normal title/back app bars. The current bottom/rail destination is communicated by icon, label, and selected container—not colour alone.
+The shell owns the map background, scrimless floating action overlay, floating bottom bar or rail, device status, max-width content boundary, and primary action slot. Neither primary nor independent pages use full-width top chrome or page titles; independent routes use the four-corner action layer. The current bottom/rail destination is communicated by icon, label, and selected container—not colour alone.
 
 Device status distinguishes disconnected, saved locally, pending, syncing, synced, and retryable failure. Success may be transient. Failure remains visible until resolved or dismissed and exposes its full message.
 
@@ -277,7 +280,7 @@ Every action supports default, pressed, focused, disabled, loading when applicab
 
 ### Cards and rows
 
-Routine cards use the card surface role and 12 dp shape. Summary/selected cards use their semantic container roles. A whole-card click has one primary meaning; adjacent inline actions must not compete with it. Track-card place names always use one-line trailing ellipsis, and card height never changes with name length; other long names follow their documented overflow rule.
+Routine cards use the card surface role and device screen radius. Summary/selected cards use their semantic container roles. Card content observes the shared curve-safe inset rather than legacy 8/16 dp padding. A whole-card click has one primary meaning; adjacent inline actions must not compete with it. Track-card place names always use one-line trailing ellipsis, and card height never changes with name length; stars and text move inward together while journey-node alignment remains unchanged. Other long names follow their documented overflow rule.
 
 Track cards align to their journey-band node midpoint. For each date group, the first item connects down only, middle items connect both ways, and the last connects up only. The whole card opens editing; do not add a duplicate edit icon.
 
