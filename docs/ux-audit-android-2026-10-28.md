@@ -1,6 +1,6 @@
 [简体中文](ux-audit-android-2026-10-28.zh_CN.md) · **English**
 
-# BugChecking Android UI/UX audit — 2026-10-28
+# Been Android UI/UX audit — 2026-10-28
 
 ## 1. Scope and evidence
 
@@ -284,7 +284,7 @@ These category snapshots describe the current implementation against Material 3/
 
 ## 8. What is working, and what was deliberately left alone
 
-What is working: the app uses a real Material 3 theme, dynamic and static schemes, consistent shapes, a four-destination navigation model, clear dedicated editor routes, non-colour sync labels, delete confirmations, TalkBack reorder actions, and sensible maximum content widths. The journey band, candy containers, map ground, centred avatar, and QR presentation mode all feel specific to BugChecking.
+What is working: the app uses a real Material 3 theme, dynamic and static schemes, consistent shapes, a four-destination navigation model, clear dedicated editor routes, non-colour sync labels, delete confirmations, TalkBack reorder actions, and sensible maximum content widths. The journey band, candy containers, map ground, centred avatar, and QR presentation mode all feel specific to Been.
 
 Left alone: the accepted Dynamic Soft Candy/Night Fog direction, city-map background, lack of visible checklist sort controls, card-wide track edit target, fixed one-line track-card height, hidden long-press favourite, combined personal/backup page, restrained empty states, and system typography. These are explicit personal-tool tradeoffs and are not defects on first-use discoverability or mainstream comprehension grounds.
 

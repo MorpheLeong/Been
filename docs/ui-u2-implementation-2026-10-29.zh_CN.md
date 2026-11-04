@@ -1,6 +1,6 @@
 **简体中文** · [English](ui-u2-implementation-2026-10-29.md)
 
-# BugChecking Android UI-U2 实施检查点
+# Been Android UI-U2 实施检查点
 
 日期：2026-10-29
 更新：2026-10-30

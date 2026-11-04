@@ -9,10 +9,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $environmentScript = Join-Path $PSScriptRoot "codex-env.ps1"
 $buildRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("bugchecking-firmware-" + [guid]::NewGuid().ToString("N"))
 $sdkconfigPath = Join-Path $buildRoot "sdkconfig"
-$mergedImage = Join-Path $buildRoot "BugChecking-full.bin"
+$mergedImage = Join-Path $buildRoot "Been-full.bin"
 $deliveryDirectory = Join-Path $repoRoot "build"
 $archiveDirectory = Join-Path $deliveryDirectory "firmware"
-$deliveryImage = Join-Path $deliveryDirectory "BugChecking-full.bin"
+$deliveryImage = Join-Path $deliveryDirectory "Been-full.bin"
 $previousSdkconfigDefaults = $env:SDKCONFIG_DEFAULTS
 $previousIdfTarget = $env:IDF_TARGET
 

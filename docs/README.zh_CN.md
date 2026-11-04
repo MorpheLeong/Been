@@ -199,7 +199,7 @@ LICENSE                  仓库许可证
 
 | 入口 | 你可以找到 |
 | --- | --- |
-| [BugChecking Android 设计系统](DESIGN.zh_CN.md) · [UI/UX 审计](ux-audit-android-2026-10-28.zh_CN.md) · [分阶段调整计划](android-ui-adjustment-roadmap-2026-10-28.zh_CN.md) | Android 视觉／交互规范、审计证据、实施顺序与验收门槛 |
+| [Been Android 设计系统](DESIGN.zh_CN.md) · [UI/UX 审计](ux-audit-android-2026-10-28.zh_CN.md) · [分阶段调整计划](android-ui-adjustment-roadmap-2026-10-28.zh_CN.md) | Android 视觉／交互规范、审计证据、实施顺序与验收门槛 |
 | [UI-U0 基线与证据记录](ui-u0-baseline-2026-10-29.zh_CN.md) | 当前工作区、APK、真机矩阵、synthetic fixture、截图／地图复现状态 |
 | [个人应用开发规范](personal-app-development-standard.zh_CN.md) | 个人设计倾向、通用工程底线、返工复盘、开发流程与未来 skill 晋级路径 |
 | [开发指南](development/README.zh_CN.md) | AI 工作流、工程规范、CI 与发布流程 |

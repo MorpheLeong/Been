@@ -354,15 +354,15 @@ class MainActivity : ComponentActivity() {
     private fun connectOrOpenSettings() {
         val adapter = getSystemService(BluetoothManager::class.java)?.adapter
         val hasBondedPassport = runCatching {
-            adapter?.bondedDevices?.any { it.name == "BugChecking" || it.name == "AI Passport" } == true
+            adapter?.bondedDevices?.any { it.name in setOf("Been", "BugChecking", "AI Passport") } == true
         }.getOrDefault(false)
         if (!hasBondedPassport) {
-            bleState.value = "请先在系统蓝牙设置中配对 BugChecking"
-            Toast.makeText(this, "请先在系统蓝牙设置中配对 BugChecking", Toast.LENGTH_LONG).show()
+            bleState.value = "请先在系统蓝牙设置中配对 AI Passport"
+            Toast.makeText(this, "请先在系统蓝牙设置中配对 AI Passport", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
             return
         }
-        bleState.value = "正在连接 BugChecking"
+        bleState.value = "正在连接 AI Passport"
         startBle()
     }
     private fun requestSync() {
@@ -502,7 +502,8 @@ private fun PassportApp(
             return@LaunchedEffect
         }
         val message = when {
-            !bleConnected && bleState.isNotBlank() -> bleState.replace("Passport", "BugChecking")
+            !bleConnected && bleState.isNotBlank() -> bleState
+                .replace("BugChecking", "AI Passport")
             syncStatus == PassportSyncStatus.FAILED -> bleState
             syncStatus == PassportSyncStatus.PENDING -> syncStatus.label
             syncStatus == PassportSyncStatus.SYNCING -> syncStatus.label
@@ -1310,11 +1311,11 @@ private fun DeviceStatusAction(
     )
     val enabled = state != DeviceActionState.CONNECTING && state != DeviceActionState.SYNCING
     val actionDescription = when (state) {
-        DeviceActionState.DISCONNECTED -> "连接 BugChecking"
-        DeviceActionState.CONNECTING -> "正在连接 BugChecking"
+        DeviceActionState.DISCONNECTED -> "连接 AI Passport"
+        DeviceActionState.CONNECTING -> "正在连接 AI Passport"
         DeviceActionState.FAILED -> "重试同步"
-        DeviceActionState.SYNCING -> "正在同步到 BugChecking"
-        DeviceActionState.CONNECTED -> "同步到 BugChecking"
+        DeviceActionState.SYNCING -> "正在同步到 AI Passport"
+        DeviceActionState.CONNECTED -> "同步到 AI Passport"
     }
     val labelMaxWidth = (maxWidth - PrimaryTopActionTokens.targetSize)
         .coerceAtLeast(0.dp)

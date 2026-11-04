@@ -1,6 +1,6 @@
 [简体中文](ui-u1-implementation-2026-10-29.zh_CN.md) · **English**
 
-# BugChecking Android UI-U1 Implementation and Acceptance Checkpoint
+# Been Android UI-U1 Implementation and Acceptance Checkpoint
 
 Date: 2026-10-29
 Status: `ACCEPTED`

@@ -1,6 +1,6 @@
 **简体中文** · [English](android-ui-adjustment-roadmap-2026-10-28.md)
 
-# BugChecking Android UI 调整排期与验收计划
+# Been Android UI 调整排期与验收计划
 
 状态：待实施草案 0.1
 基线日期：2026-10-28
@@ -302,7 +302,7 @@ Device：PASS / FAIL / NOT RUN
 1. 实施中：写入项目文档，状态为 `proposed`。
 2. 真机与自动门禁通过：状态改为 `verified`，但仍不自动泛化为个人偏好。
 3. 用户明确说“UI-Ux 验收通过”：在 `C:\Users\MPHNUC\.codex\memories\extensions\ad_hoc\notes\` 新增一条小型记录，包含 `scope`、`applies_to`、证据、已接受 token／契约、被替代规则和禁止泛化的边界。
-4. BugChecking 专属决定先进入项目记忆；只有在 BugChecking 与天色 beta 两个项目都得到验证，或用户明确要求提升，才进入跨项目个人规范。
+4. Been 专属决定先进入项目记忆；只有在 Been 与天色 beta 两个项目都得到验证，或用户明确要求提升，才进入跨项目个人规范。
 5. 跨项目规则稳定后，再用它们创建个人开发 skill；skill 必须包含触发条件、反例、决策树、验收模板和不得自动套用的产品例外。
 
 本计划本身不写入记忆，因为尚未实施和验收。

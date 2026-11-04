@@ -1,6 +1,6 @@
 [简体中文](ui-u0-baseline-2026-10-29.zh_CN.md) · **English**
 
-# BugChecking Android UI-U0 baseline and evidence record
+# Been Android UI-U0 baseline and evidence record
 
 Status: `ACCEPTED`; the owner explicitly confirmed “UI-U0 accepted” on 2026-10-29
 Recorded: 2026-10-29 01:31 Asia/Shanghai
@@ -22,7 +22,7 @@ Evidence order is live device > device capture/recording > current code/resource
 | Application | `com.bugchecking.app`, source and installed `versionCode=1`, `versionName=0.1.0`, installed target SDK 36 |
 | Pre-update installed APK | 2026-10-28 04:51:02; 61,029,498 bytes; SHA-256 `717B0019A47F04943ADB8707271600FA88079119A23A1DA1432484F95FAA9060` |
 | Post-update installed APK | 2026-10-29 01:19:24; 123,055,609 bytes; SHA-256 `221750AD8548B68C3A354AC20DE777B62F2B60BE303A62D1FFE3760D9C915C9E` |
-| Current-worktree build | `assembleDebug` PASS; `BugChecking-debug.apk`, 123,055,609 bytes; SHA-256 `221750AD8548B68C3A354AC20DE777B62F2B60BE303A62D1FFE3760D9C915C9E` |
+| Current-worktree build | `assembleDebug` PASS; `Been-debug.apk`, 123,055,609 bytes; SHA-256 `221750AD8548B68C3A354AC20DE777B62F2B60BE303A62D1FFE3760D9C915C9E` |
 
 The installed APK was pulled only to a system temporary folder for hashing and then deleted.
 

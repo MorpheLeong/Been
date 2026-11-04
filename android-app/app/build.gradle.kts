@@ -25,7 +25,7 @@ android {
 }
 
 base {
-    archivesName.set("BugChecking")
+    archivesName.set("Been")
 }
 
 dependencies {

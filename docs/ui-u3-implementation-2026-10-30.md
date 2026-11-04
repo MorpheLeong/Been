@@ -1,6 +1,6 @@
 [简体中文](ui-u3-implementation-2026-10-30.zh_CN.md) · **English**
 
-# BugChecking Android UI-U3 Implementation and Acceptance Checkpoint
+# Been Android UI-U3 Implementation and Acceptance Checkpoint
 
 Date: 2026-10-30
 Status: `ACCEPTED`
@@ -34,7 +34,7 @@ UI-U3 rebalances only the Tracks home action hierarchy and card-title overflow. 
 | Android gate | PASS | `testDebugUnitTest`, `lintDebug`, and `assembleDebug` completed successfully on the final tokenised code (51 tasks: 15 executed, 36 up-to-date) |
 | Repository check | PASS | `git diff --check` reports no whitespace error; unrelated dirty-worktree changes were preserved |
 
-The final installed debug APK is `BugChecking-debug.apk`, SHA-256 `583DDD1E181973835396DBEE9B04BE5D07F40F4D65E3B0A355E86B4A4A51624C`. The temporary 2.0× font setting was restored to 1.0× after verification. Screenshots contain private place data and were removed after inspection.
+The final installed debug APK is `Been-debug.apk`, SHA-256 `583DDD1E181973835396DBEE9B04BE5D07F40F4D65E3B0A355E86B4A4A51624C`. The temporary 2.0× font setting was restored to 1.0× after verification. Screenshots contain private place data and were removed after inspection.
 
 ## 4. Accepted tokens and contracts
 
@@ -47,7 +47,7 @@ The final installed debug APK is `BugChecking-debug.apk`, SHA-256 `583DDD1E18197
 | `track-card/title-max-lines` | 1 |
 | `track-card/title-overflow` | trailing ellipsis |
 
-These are BugChecking project contracts. They do not automatically become Tianse beta rules or cross-project personal preferences.
+These are Been project contracts. They do not automatically become Tianse beta rules or cross-project personal preferences.
 
 ## 5. Gate state
 

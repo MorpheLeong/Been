@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate BugChecking Android launcher icons from the approved source art."""
+"""Generate Been Android launcher icons from the approved source art."""
 
 from pathlib import Path
 

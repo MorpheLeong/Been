@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check or explicitly install repository-local BugChecking firmware skill links."""
+"""Check or explicitly install repository-local Been firmware skill links."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 **简体中文** · [English](ui-u3-implementation-2026-10-30.md)
 
-# BugChecking Android UI-U3 实施与验收检查点
+# Been Android UI-U3 实施与验收检查点
 
 日期：2026-10-30
 状态：`ACCEPTED`
@@ -34,7 +34,7 @@ UI-U3 只调整轨迹主页的动作层级和卡片标题溢出规则。四个�
 | Android 门禁 | PASS | 最终 token 化代码上的 `testDebugUnitTest`、`lintDebug`、`assembleDebug` 全部成功（51 tasks：15 executed，36 up-to-date） |
 | 仓库检查 | PASS | `git diff --check` 无空白错误；无关脏工作区修改均保留 |
 
-最终安装的调试 APK 为 `BugChecking-debug.apk`，SHA-256：`583DDD1E181973835396DBEE9B04BE5D07F40F4D65E3B0A355E86B4A4A51624C`。2.0× 测试后系统字体已恢复为 1.0×。截图包含私人地点数据，检查后已删除。
+最终安装的调试 APK 为 `Been-debug.apk`，SHA-256：`583DDD1E181973835396DBEE9B04BE5D07F40F4D65E3B0A355E86B4A4A51624C`。2.0× 测试后系统字体已恢复为 1.0×。截图包含私人地点数据，检查后已删除。
 
 ## 4. 已验收 token 与契约
 
@@ -47,7 +47,7 @@ UI-U3 只调整轨迹主页的动作层级和卡片标题溢出规则。四个�
 | `track-card/title-max-lines` | 1 |
 | `track-card/title-overflow` | 尾部省略号 |
 
-这些是 BugChecking 项目契约，不自动成为天色 beta 规则或跨项目个人偏好。
+这些是 Been 项目契约，不自动成为天色 beta 规则或跨项目个人偏好。
 
 ## 5. 阶段状态
 

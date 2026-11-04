@@ -189,11 +189,11 @@ monitor.
 idf.py -p <COMx> flash
 idf.py -p <COMx> monitor
 idf.py -p <COMx> flash monitor
-python -m esptool --chip esp32c3 -p <COMx> -b 460800 write-flash 0x0 build\BugChecking-full.bin
+python -m esptool --chip esp32c3 -p <COMx> -b 460800 write-flash 0x0 build\Been-full.bin
 ```
 
 The last command is the preferred delivery-image flow. The ordinary
-`build\BugChecking.bin` is app-only and belongs at `0x10000`, never at
+`build\Been.bin` is app-only and belongs at `0x10000`, never at
 `0x0`. Flashing always requires explicit user authorization and does not imply a
 full-chip erase.
 

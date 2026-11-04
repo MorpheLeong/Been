@@ -1,6 +1,6 @@
 **简体中文** · [English](ui-u1-implementation-2026-10-29.md)
 
-# BugChecking Android UI-U1 实施与验收检查点
+# Been Android UI-U1 实施与验收检查点
 
 日期：2026-10-29
 状态：`ACCEPTED`

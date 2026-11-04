@@ -1,6 +1,6 @@
 [简体中文](ui-u2-implementation-2026-10-29.zh_CN.md) · **English**
 
-# BugChecking Android UI-U2 Implementation Checkpoint
+# Been Android UI-U2 Implementation Checkpoint
 
 Date: 2026-10-29
 Updated: 2026-10-30

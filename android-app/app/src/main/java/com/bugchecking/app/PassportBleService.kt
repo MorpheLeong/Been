@@ -116,7 +116,7 @@ class PassportBleService : Service() {
                 reconnectAllowed = true
                 retriesScheduled = 0
                 syncWhenConnected = false
-                startForeground(NOTIFICATION_ID, notification("正在连接 BugChecking"))
+                startForeground(NOTIFICATION_ID, notification("正在连接 AI Passport"))
                 if (ready) broadcast(STATE, "已安全连接，等待 Passport 指令") else connectOrScan()
             }
             ACTION_SYNC -> {
@@ -124,7 +124,7 @@ class PassportBleService : Service() {
                 reconnectAllowed = true
                 retriesScheduled = 0
                 syncWhenConnected = true
-                startForeground(NOTIFICATION_ID, notification("正在连接 BugChecking"))
+                startForeground(NOTIFICATION_ID, notification("正在连接 AI Passport"))
                 if (ready) {
                     syncSnapshot()
                     syncTrackNames()
@@ -206,7 +206,7 @@ class PassportBleService : Service() {
                 if (result.device.bondState != BluetoothDevice.BOND_BONDED) {
                     reconnectAllowed = false
                     stopScanning()
-                    broadcast(STATE, "请先在系统蓝牙设置中配对 BugChecking")
+                    broadcast(STATE, "请先在系统蓝牙设置中配对 AI Passport")
                     return
                 }
                 connectDevice(result.device, "已发现 Passport，正在连接")
@@ -247,7 +247,7 @@ class PassportBleService : Service() {
                         else -> {
                             reconnectAllowed = false
                             closeConnection()
-                            broadcast(STATE, "请先在系统蓝牙设置中配对 BugChecking")
+                            broadcast(STATE, "请先在系统蓝牙设置中配对 AI Passport")
                         }
                     }
                 }
@@ -756,7 +756,7 @@ class PassportBleService : Service() {
         val delay = reconnectDelayMs(retriesScheduled)
         if (delay == null) {
             reconnectAllowed = false
-            broadcast(STATE, "无法连接 BugChecking，请点连接重试")
+            broadcast(STATE, "无法连接 AI Passport，请点连接重试")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
@@ -832,14 +832,14 @@ class PassportBleService : Service() {
     }
     private fun createNotificationChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "BugChecking 连接", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_ID, "Been 连接", NotificationManager.IMPORTANCE_LOW)
         )
     }
     private fun notification(text: String): Notification {
         val stop = Intent(this, PassportBleService::class.java).setAction(ACTION_STOP)
         val pending = android.app.PendingIntent.getService(this, 1, stop, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL_ID).setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("BugChecking").setContentText(text)
+            .setContentTitle("Been").setContentText(text)
             .addAction(Notification.Action.Builder(null, "断开", pending).build())
             .setOngoing(true).build()
     }
@@ -857,7 +857,7 @@ class PassportBleService : Service() {
         private const val TAG = "PassportBleService"
         private const val CHANNEL_ID = "passport_ble"
         private const val NOTIFICATION_ID = 40
-        private val DEVICE_NAMES = setOf("BugChecking", "AI Passport")
+        private val DEVICE_NAMES = setOf("Been", "BugChecking", "AI Passport")
         private const val DISCOVERY_TIMEOUT_MS = 15_000L
         private const val DEFAULT_ATT_MTU = 23
         private const val PREFERRED_ATT_MTU = 247

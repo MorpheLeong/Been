@@ -172,10 +172,10 @@ monitor。
 idf.py -p <COMx> flash
 idf.py -p <COMx> monitor
 idf.py -p <COMx> flash monitor
-python -m esptool --chip esp32c3 -p <COMx> -b 460800 write-flash 0x0 build\BugChecking-full.bin
+python -m esptool --chip esp32c3 -p <COMx> -b 460800 write-flash 0x0 build\Been-full.bin
 ```
 
-最后一条是首选交付镜像流程。普通 `build\BugChecking.bin` 只是 app，
+最后一条是首选交付镜像流程。普通 `build\Been.bin` 只是 app，
 只能写入 `0x10000`，绝不能写入 `0x0`。烧录始终需要用户明确授权，也不隐含
 全片擦除。
 

@@ -1,6 +1,6 @@
 **简体中文** · [English](ui-u0-baseline-2026-10-29.md)
 
-# BugChecking Android UI-U0 基线与证据记录
+# Been Android UI-U0 基线与证据记录
 
 状态：`ACCEPTED`，所有者于 2026-10-29 明确确认“UI-U0 验收通过”
 记录时间：2026-10-29 01:31（Asia/Shanghai）
@@ -27,7 +27,7 @@
 | 已安装版本 | `versionCode=1`，`versionName=0.1.0`，`targetSdk=36` |
 | 更新前已安装 APK | 2026-10-28 04:51:02；61,029,498 bytes；SHA-256 `717B0019A47F04943ADB8707271600FA88079119A23A1DA1432484F95FAA9060` |
 | 更新后已安装 APK | 2026-10-29 01:19:24；123,055,609 bytes；SHA-256 `221750AD8548B68C3A354AC20DE777B62F2B60BE303A62D1FFE3760D9C915C9E` |
-| 当前工作区构建 | `assembleDebug` PASS；`BugChecking-debug.apk` 123,055,609 bytes；SHA-256 `221750AD8548B68C3A354AC20DE777B62F2B60BE303A62D1FFE3760D9C915C9E` |
+| 当前工作区构建 | `assembleDebug` PASS；`Been-debug.apk` 123,055,609 bytes；SHA-256 `221750AD8548B68C3A354AC20DE777B62F2B60BE303A62D1FFE3760D9C915C9E` |
 
 已安装 APK 只拉取到系统临时目录计算 hash，随后删除；没有复制到仓库。
 

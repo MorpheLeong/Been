@@ -1,6 +1,6 @@
 [简体中文](android-ui-adjustment-roadmap-2026-10-28.zh_CN.md) · **English**
 
-# BugChecking Android UI adjustment roadmap and acceptance plan
+# Been Android UI adjustment roadmap and acceptance plan
 
 Status: pre-implementation draft 0.1
 Baseline: 2026-10-28
@@ -162,6 +162,6 @@ Rules superseded:
 
 ## 5. Memory protocol
 
-Implementation decisions start as `proposed`; automated and device gates make them `verified`; only explicit “UI-Ux accepted” makes them `accepted`. Then add one small note under `C:\Users\MPHNUC\.codex\memories\extensions\ad_hoc\notes\` containing `scope`, `applies_to`, evidence, accepted tokens/contracts, superseded rules, and non-generalisation boundaries. BugChecking-specific decisions remain project-scoped. A preference becomes cross-project only after BugChecking and Tianse beta both validate it, or the owner explicitly promotes it. The future personal development skill is created only after those rules are stable and must include triggers, counterexamples, a decision tree, acceptance templates, and product exceptions.
+Implementation decisions start as `proposed`; automated and device gates make them `verified`; only explicit “UI-Ux accepted” makes them `accepted`. Then add one small note under `C:\Users\MPHNUC\.codex\memories\extensions\ad_hoc\notes\` containing `scope`, `applies_to`, evidence, accepted tokens/contracts, superseded rules, and non-generalisation boundaries. Been-specific decisions remain project-scoped. A preference becomes cross-project only after Been and Tianse beta both validate it, or the owner explicitly promotes it. The future personal development skill is created only after those rules are stable and must include triggers, counterexamples, a decision tree, acceptance templates, and product exceptions.
 
 This plan itself is not written to memory before implementation and acceptance.

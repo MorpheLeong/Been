@@ -1,8 +1,8 @@
 [简体中文](DESIGN.zh_CN.md) · **English**
 
 ---
-name: BugChecking Android
-description: Normative UI and interaction rules for the BugChecking Android companion app.
+name: Been Android
+description: Normative UI and interaction rules for the Been Android companion app.
 colors:
   action-neon: "#53FF9A"
   on-action-neon: "#00351D"
@@ -39,15 +39,15 @@ components:
   list-max-width: 840dp
 ---
 
-# BugChecking Android design system
+# Been Android design system
 
-This document is normative for new Android UI and for changes to existing screens. It records the accepted product direction and the constraints future work must preserve. The audit report [BugChecking Android UI/UX audit — 2026-10-28](ux-audit-android-2026-10-28.md) records current compliance gaps; a rule appearing here does not claim that every current screen already passes it.
+This document is normative for new Android UI and for changes to existing screens. It records the accepted product direction and the constraints future work must preserve. The audit report [Been Android UI/UX audit — 2026-10-28](ux-audit-android-2026-10-28.md) records current compliance gaps; a rule appearing here does not claim that every current screen already passes it.
 
 ## Overview
 
 **Creative North Star: "A journey atlas softened for everyday use."**
 
-BugChecking is a personal Android companion for preparing trips, managing check-in content, recording real visits, and synchronising identity and selected content to the BugChecking device. Its current audience is the product owner/developer, who knows its hidden gestures and data model; first-use conversion and zero learning cost are not goals. It is an Operate surface with Explore/Play qualities: functional accuracy, visual identity, and interaction delight outrank explanatory copy and explicit labels.
+Been is a personal Android companion for preparing trips, managing check-in content, recording real visits, and synchronising identity and selected content to the Been device. Its current audience is the product owner/developer, who knows its hidden gestures and data model; first-use conversion and zero learning cost are not goals. It is an Operate surface with Explore/Play qualities: functional accuracy, visual identity, and interaction delight outrank explanatory copy and explicit labels.
 
 The visual world combines a centred-crop halftone city map, a pale-apricot light canvas, rose-peach surfaces, and charcoal/grey-pink dark surfaces. Neon green and candy red are scarce functional accents rather than component defaults. The map is a quiet geographic memory, not the content itself. Cards and controls sit above it as readable, task-oriented layers. Brand character comes from the journey band, map texture, warm surfaces, and precise motion—not from ornamental gradients, glows, or novel controls.
 
@@ -86,7 +86,7 @@ Colour follows three layers:
 | `layout/safe-drawing-bottom` | Map attribution and edge controls consume horizontal and bottom `safeDrawing`/system-navigation insets. |
 | `map/attribution-scrim` | Attribution uses `surface.copy(alpha = 0.88f)` with matching `onSurface`, 8 dp shape, 1 dp tonal elevation, padding, and safe-drawing awareness. |
 
-These BugChecking project contracts were accepted through the UI-U1 PLZ110 device matrix on 2026-10-29. They do not promote the unresolved map-geometry candidates owned by UI-U2.
+These Been project contracts were accepted through the UI-U1 PLZ110 device matrix on 2026-10-29. They do not promote the unresolved map-geometry candidates owned by UI-U2.
 
 ### Accepted UI-U2 contracts
 
@@ -100,7 +100,7 @@ These BugChecking project contracts were accepted through the UI-U1 PLZ110 devic
 | `motion/track-focus-cue` | After scrolling, the target card shows a 2 dp primary outline for 1.8 seconds and fades it over 450 ms. |
 | Renderer-coordinate contract | MapLibre GeoJSON sources/layers own points and routes; UI code does not reimplement projection or rebuild annotations after camera idle. |
 
-These BugChecking project contracts passed the UI-U2 PLZ110 and owner acceptance on 2026-10-30. `map/cluster-radius` and `map/cluster-zoom-thresholds` remain `proposed` because native clustering compatibility is deferred.
+These Been project contracts passed the UI-U2 PLZ110 and owner acceptance on 2026-10-30. `map/cluster-radius` and `map/cluster-zoom-thresholds` remain `proposed` because native clustering compatibility is deferred.
 
 ### Accepted UI-U3 contracts
 
@@ -113,13 +113,13 @@ These BugChecking project contracts passed the UI-U2 PLZ110 and owner acceptance
 | `track-card/title-max-lines` | Track-card place names use exactly one line. |
 | `track-card/title-overflow` | Overflow is trailing ellipsis; automatic wrapping and height changes are forbidden. |
 
-These BugChecking project contracts passed the PLZ110 1.0× / 2.0× font matrix and owner acceptance on 2026-10-30. UI-U4 is unlocked; these rules remain project-scoped rather than becoming a cross-project personal preference.
+These Been project contracts passed the PLZ110 1.0× / 2.0× font matrix and owner acceptance on 2026-10-30. UI-U4 is unlocked; these rules remain project-scoped rather than becoming a cross-project personal preference.
 
 The accepted product intent—Add as the sole FAB, Map/Place library persistently visible, and equal-height one-line cards—remains binding. The earlier in-flow placement of the signature strip is superseded by the scrimless floating-shell contract below, which passed owner acceptance with UI-U4 on 2026-11-04.
 
 ### Accepted UI-U3.5 / UI-U4 colour and primary-shell rules
 
-UI-U3.5 uses a fixed brand palette and no longer derives colour from Android wallpaper. The following rules entered the UI-U4 device matrix and received explicit owner acceptance with UI-U4 on 2026-11-04. Their state is BugChecking-project `accepted`; they do not automatically become cross-project personal preferences:
+UI-U3.5 uses a fixed brand palette and no longer derives colour from Android wallpaper. The following rules entered the UI-U4 device matrix and received explicit owner acceptance with UI-U4 on 2026-11-04. Their state is Been-project `accepted`; they do not automatically become cross-project personal preferences:
 
 | ID | Current definition |
 | --- | --- |
@@ -280,7 +280,7 @@ Every action supports default, pressed, focused, disabled, loading when applicab
 
 ### Cards and rows
 
-Routine cards use the card surface role and device screen radius. Summary/selected cards use their semantic container roles. Card content observes the shared curve-safe inset rather than legacy 8/16 dp padding. A whole-card click has one primary meaning; adjacent inline actions must not compete with it. Track-card place names always use one-line trailing ellipsis, and card height never changes with name length; stars and text move inward together while journey-node alignment remains unchanged. Other long names follow their documented overflow rule.
+Routine cards use the card surface role and device screen radius. Summary/selected cards use their semantic container roles. Card content observes the shared curve-safe inset rather than legacy 8/16 dp padding. A whole-card click has one primary meaning; adjacent inline actions must not compete with it. Track-card and Place-library place names always use one-line trailing ellipsis, and card height never changes with name length; journey-node alignment remains unchanged. Other long names follow their documented overflow rule.
 
 Track cards align to their journey-band node midpoint. For each date group, the first item connects down only, middle items connect both ways, and the last connects up only. The whole card opens editing; do not add a duplicate edit icon.
 
@@ -304,7 +304,7 @@ Each data view defines loading, day-one empty, filtered empty, error, offline, a
 
 ### Favourite tiers
 
-Favourite tiers and Place library are signature parts of the Tracks experience, while their data migration, BLE/sync meaning, and compatibility still require separate approval. Timed long press is the explicitly accepted primary favourite interaction: it may remain hidden and novel without a persistent text entry or first-use hint. Once holding begins, tier feedback must be timely, controllable, and must not accidentally open editing. Tiers 1–3 use one candy-red progression—peach blush, candy pink, raspberry—in track cards, pulse fills/outlines, Place-library filters/cards/stars, and map stars; interaction neon green is not a favourite-tier colour. When a track first creates or joins a saved place, all unlinked historical tracks that match that place without ambiguity are linked immediately and inherit its tier. Place library itself remains visibly reachable from Tracks.
+Favourite tiers and Place library are signature parts of the Tracks experience, while their data migration, BLE/sync meaning, and compatibility still require separate approval. Timed long press is the explicitly accepted primary favourite interaction: it may remain hidden and novel without a persistent text entry or first-use hint. Once holding begins, tier feedback must be timely, controllable, and must not accidentally open editing. Tiers 1–3 use one candy-red progression—peach blush, candy pink, raspberry—in track cards, pulse fills/outlines, and Place-library filters/cards; interaction neon green is not a favourite-tier colour. Track cards, filter labels, and Place-library cards do not repeat the tier as decorative stars; the map keeps its five-point favourite marker because shape distinguishes saved places from ordinary coordinates. When a track first creates or joins a saved place, all unlinked historical tracks that match that place without ambiguity are linked immediately and inherit its tier. Place library itself remains visibly reachable from Tracks.
 
 ## Do's and Don'ts
 
@@ -319,7 +319,7 @@ Favourite tiers and Place library are signature parts of the Tracks experience, 
 - **Do** keep Map and Place library persistently visible while Add remains the only primary action.
 - **Do** default to less explanatory copy; let consistent icons, placement, and feedback teach the tool.
 - **Do** keep real check-in coordinates unchanged when selecting a nearby place name; only the displayed name may change.
-- **Do** use `BugChecking` for new external UI and documentation; keep legacy Passport naming only where compatibility/history requires it.
+- **Do** use `Been` for new external UI and documentation; keep `BugChecking`, Passport naming, and `com.bugchecking.app` only where compatibility/history requires them.
 - **Do** use non-colour text/icon channels for sync, completion, selection, and error state.
 
 ### Don't

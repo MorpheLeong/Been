@@ -45,8 +45,8 @@
 额外镜像必须完整落在一个实际配置的分区内，允许从该分区内部偏移开始。
 仅声明资源分区不要求预装镜像，但一旦在 `flash_args` 列出镜像就必须校验它。
 
-只上传 `build/BugChecking-full.bin`。名称相近的应用单镜像
-`build/BugChecking.bin` 不包含 bootloader 和分区表。
+只上传 `build/Been-full.bin`。名称相近的应用单镜像
+`build/Been.bin` 不包含 bootloader 和分区表。
 
 ## 烧录与已存数据
 

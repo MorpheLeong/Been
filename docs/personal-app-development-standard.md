@@ -2,9 +2,9 @@
 
 # Personal application development standard
 
-Status: candidate standard 0.2; BugChecking UI-U0 through UI-U4 are accepted; cross-project preferences still await Tianse beta, and UI-U5 is not accepted
+Status: candidate standard 0.2; Been UI-U0 through UI-U4 are accepted; cross-project preferences still await Tianse beta, and UI-U5 is not accepted
 Audience: the product owner and collaborating developers/AI
-Current evidence: BugChecking Android; not every rule is cross-project yet
+Current evidence: Been Android; not every rule is cross-project yet
 
 ## 1. Purpose and rule levels
 
@@ -14,12 +14,12 @@ Rules use four classes. A normative rule intended for `DESIGN`, memory, or a ski
 
 - **E — Engineering floor:** mandatory everywhere and never waived by personal-tool status.
 - **P — Confirmed personal preference:** explicitly promoted by the owner or stable in at least two projects, with its applicable mode stated.
-- **B — Project-bounded contract:** applies only to one named project. Current B entries belong to BugChecking; Tianse may create its own B entries. B never generalises by default.
+- **B — Project-bounded contract:** applies only to one named project. Current B entries belong to Been; Tianse may create its own B entries. B never generalises by default.
 - **C — Candidate personal preference:** a cross-project hypothesis awaiting Tianse beta evidence or explicit owner promotion; failure may leave it as C or become a B rule for a named project.
 
 Class and state are orthogonal. A C rule may be `accepted` for one experiment and remain only a candidate; `verified` means agreed automated/device evidence passed, while `accepted` additionally requires explicit owner confirmation. Conditional acceptance remains `verified`; `superseded` is terminal but traceable. C-to-P promotion is a separate Gate M decision, not part of single-project acceptance.
 
-Current P rules include minimal explanatory copy, icon-first low-cost actions, recoverable hidden gestures, keeping signature secondary actions visible, and assigning colour emphasis by real operational importance rather than component names or frontend nesting. Exact colours and the BugChecking visual world remain B; bright-soft colour, chromatic dark surfaces, and system-font preference remain C.
+Current P rules include minimal explanatory copy, icon-first low-cost actions, recoverable hidden gestures, keeping signature secondary actions visible, and assigning colour emphasis by real operational importance rather than component names or frontend nesting. Exact colours and the Been visual world remain B; bright-soft colour, chromatic dark surfaces, and system-font preference remain C.
 
 **Non-waivable rule.** Personal-tool mode may change guidance density, expression, and interaction visibility. It never lowers data correctness, recoverability, permission/privacy security, platform stability, hardware safety, or necessary operability.
 
@@ -33,24 +33,24 @@ Current P rules include minimal explanatory copy, icon-first low-cost actions, r
 | E-04 | Irreversible changes, migration, protocol, and compatibility require layered separate approval | E / `accepted` | Universal; favourite scope and rename reviews | UI acceptance never approves another layer |
 | E-05 | Record and preserve user worktree changes before implementation | E / `accepted` | Universal collaboration floor | Stop and report an unavoidable conflict |
 | E-06 | External dependencies/resources verify licence, maintenance, glyphs, attribution, and failure strategy | E / `accepted` | Universal; font, map, and resource choice | Apply fields relevant to the resource type |
-| E-07 | Gate blocking, risk owner, artifact traceability, and rollback are delivery contracts | E / `proposed` | This process; awaiting current BugChecking validation | Owner decides acceptance after UI-U5 |
+| E-07 | Gate blocking, risk owner, artifact traceability, and rollback are delivery contracts | E / `proposed` | This process; awaiting current Been validation | Owner decides acceptance after UI-U5 |
 | P-01 | Personal tools use minimal copy and icon-first UI; explain risk, recovery, and genuine ambiguity | P / `accepted` | Personal tools only; explicit owner statement | Reclassify for public products |
 | P-02 | A cheap, recoverable, non-core novelty may use a hidden gesture as its only entry | P / `accepted` | Personal tools; favourite-hold statement | Core/high-cost capabilities need a visible fallback |
 | P-03 | A few signature secondary actions may remain visible below the primary action | P / `accepted` | Personal tools; Map/Place library statement | Count and first-viewport space set by brief |
 | P-04 | Accent colour follows real action/state importance, not component type or interface nesting | P / `accepted` | Personal tools and task surfaces; explicit owner statement | Platform semantic and safety states keep consistent meaning |
-| C-01 | Prefer bright-soft colour that avoids muddy greys | C / `proposed` | Cross-project candidate; BugChecking evidence only | Tianse beta or explicit owner promotion |
-| C-02 | Prefer chromatic dark surfaces | C / `proposed` | Cross-project candidate; BugChecking evidence only | Tianse beta or explicit owner promotion |
+| C-01 | Prefer bright-soft colour that avoids muddy greys | C / `proposed` | Cross-project candidate; Been evidence only | Tianse beta or explicit owner promotion |
+| C-02 | Prefer chromatic dark surfaces | C / `proposed` | Cross-project candidate; Been evidence only | Tianse beta or explicit owner promotion |
 | C-03 | Prefer system type with complete Chinese glyph coverage | C / `proposed` | Cross-project candidate | Licensed, glyph-complete, performant brand type may override |
 | C-04 | Whether minimal copy/icon-first UI extends to public products | C / `proposed` | Product-mode expansion candidate | Tianse/public-product evidence or explicit owner promotion |
 | C-05 | Whether visible signature secondary actions generalise across projects | C / `proposed` | Cross-project candidate | Tianse beta or explicit owner promotion |
 | C-06 | Whether hidden gestures may accelerate a frequent core capability | C / `proposed` | Cross-project candidate; visible fallback remains mandatory | Tianse beta or explicit owner promotion |
-| B-BC-01 | City map, journey band, and candy contrast form the BugChecking identity; UI-U3.5 replaces the old Dynamic Soft Candy/Night Fog values with a fixed palette | B / `accepted` | BugChecking; historical Phase 3, UI-U3.5, and UI-U4 acceptance on 2026-11-04 | Never copy automatically to Tianse beta |
-| B-BC-02 | Equal-height one-line track cards, Add-only FAB, visible Map/Place library | B / `accepted` product contract | BugChecking; explicit owner statement | Implementation tokens still pass the [roadmap](android-ui-adjustment-roadmap-2026-10-28.md) |
-| B-BC-03 | UI-U1 legibility, safe-area, and bottom-action contract: explicit `onSurface`, opaque forms, transparent bottom-action host, edge-to-edge system bars, safe map attribution | B / `accepted` | BugChecking; PLZ110 UI-U1 owner/device acceptance, 2026-10-29 | Project-specific; does not promote UI-U2 map geometry or a Tianse preference |
-| B-BC-04 | UI-U2 map contract: renderer-owned point/route coordinates, ordinary circles/favourite stars, distilled point sheet, Tracks-card navigation, and timed outline feedback | B / `accepted` | BugChecking; PLZ110 UI-U2 owner/device acceptance, 2026-10-30 | Cluster tokens remain deferred; never generalise as Tianse or cross-project visual rules |
-| B-BC-05 | UI-U3.5 fixed palette and emphasis allocation: apricot/rose and charcoal/grey-pink surfaces, scarce neon green, candy-red journey role, neutral helpers/cards/profile/backup controls | B / `accepted` | BugChecking; light/dark device acceptance with UI-U4 on 2026-11-04 | Never copy automatically to Tianse beta |
-| B-BC-06 | Primary pages use a scrimless floating action row with explicit transparent breathing space; bottom/rail navigation has three items and the avatar opens Me as an independent Back-navigated page; device status expands left without moving signature actions | B / `accepted` | BugChecking; PLZ110 owner/device acceptance with UI-U4 on 2026-11-04 | Do not generalise before Tianse evidence |
-| B-BC-07 | UI-U4 code-level token and shape contract: runtime Palette, system-radius cards, 16 dp fields, 24 dp ordinary buttons, concentric floating navigation, circular Add/corner actions, curve-safe content padding, and a Gradle anti-regression guard | B / `accepted` | BugChecking; UI-U4 automation and PLZ110 owner acceptance on 2026-11-04 | User colour themes replace Palette only; shape/dimensions remain app-governed; never generalise automatically to Tianse beta |
+| B-BE-01 | City map, journey band, and candy contrast form the Been identity; UI-U3.5 replaces the old Dynamic Soft Candy/Night Fog values with a fixed palette | B / `accepted` | Been; historical Phase 3, UI-U3.5, and UI-U4 acceptance on 2026-11-04 | Never copy automatically to Tianse beta |
+| B-BE-02 | Equal-height one-line track cards, Add-only FAB, visible Map/Place library | B / `accepted` product contract | Been; explicit owner statement | Implementation tokens still pass the [roadmap](android-ui-adjustment-roadmap-2026-10-28.md) |
+| B-BE-03 | UI-U1 legibility, safe-area, and bottom-action contract: explicit `onSurface`, opaque forms, transparent bottom-action host, edge-to-edge system bars, safe map attribution | B / `accepted` | Been; PLZ110 UI-U1 owner/device acceptance, 2026-10-29 | Project-specific; does not promote UI-U2 map geometry or a Tianse preference |
+| B-BE-04 | UI-U2 map contract: renderer-owned point/route coordinates, ordinary circles/favourite stars, distilled point sheet, Tracks-card navigation, and timed outline feedback | B / `accepted` | Been; PLZ110 UI-U2 owner/device acceptance, 2026-10-30 | Cluster tokens remain deferred; never generalise as Tianse or cross-project visual rules |
+| B-BE-05 | UI-U3.5 fixed palette and emphasis allocation: apricot/rose and charcoal/grey-pink surfaces, scarce neon green, candy-red journey role, neutral helpers/cards/profile/backup controls | B / `accepted` | Been; light/dark device acceptance with UI-U4 on 2026-11-04 | Never copy automatically to Tianse beta |
+| B-BE-06 | Primary pages use a scrimless floating action row with explicit transparent breathing space; bottom/rail navigation has three items and the avatar opens Me as an independent Back-navigated page; device status expands left without moving signature actions | B / `accepted` | Been; PLZ110 owner/device acceptance with UI-U4 on 2026-11-04 | Do not generalise before Tianse evidence |
+| B-BE-07 | UI-U4 code-level token and shape contract: runtime Palette, system-radius cards, 16 dp fields, 24 dp ordinary buttons, concentric floating navigation, circular Add/corner actions, curve-safe content padding, and a Gradle anti-regression guard | B / `accepted` | Been; UI-U4 automation and PLZ110 owner acceptance on 2026-11-04 | User colour themes replace Palette only; shape/dimensions remain app-governed; never generalise automatically to Tianse beta |
 
 ## 2. Product and design preferences
 
@@ -65,7 +65,7 @@ Current P rules include minimal explanatory copy, icon-first low-cost actions, r
 
 - **C candidate:** prefer bright-but-calm colour, avoiding muddy grey, pure-black expanses, and default template blue.
 - Dynamic colour is not a goal by itself. When it weakens identity or task hierarchy, prefer a fixed brand palette verified on device in both themes.
-- **C candidate:** prefer an authored dark-surface relationship over simple black inversion; BugChecking's current charcoal/grey-pink system is project-specific B.
+- **C candidate:** prefer an authored dark-surface relationship over simple black inversion; Been's current charcoal/grey-pink system is project-specific B.
 - Accent scarcity follows the real task: list core state/actions, signature states, and ordinary helpers before assigning colour; avoid several near-identical hues for the same hierarchy on one screen.
 - A recognisable environmental ground is welcome, but content sits on quiet readable local surfaces.
 - Translucency is role-based: expressive summaries/selection, steadier opaque forms. Avoid gradients, glows, decorative cards, and filler illustration as substitutes for hierarchy.
@@ -114,7 +114,7 @@ Sparse pages may use focus-building whitespace; dense forms do not stretch tasks
 - Preserve existing user changes and record worktree state before implementation.
 - Every candidate standard has a state: `proposed`, `verified`, `accepted`, or `superseded`.
 
-## 4. BugChecking-specific contract (B)
+## 4. Been-specific contract (B)
 
 - Preserve the centred-crop city map, journey band, and candy contrast. UI-U3.5's fixed apricot/rose, charcoal/grey-pink, neon-green/candy-red roles were accepted with UI-U4 on 2026-11-04 and never copy mechanically into Tianse beta.
 - Primary access is Tracks, Checklist, and QR in the Compact bottom-left floating bar or Medium+ rail plus the top-left avatar for Me. Compact keeps a separate equal-height Add control on the same row. Whole track-card tap edits; place names remain one-line ellipsised and equal-height.
@@ -123,13 +123,13 @@ Sparse pages may use focus-building whitespace; dense forms do not stretch tasks
 - Map and Place library remain visible signature secondary actions; Add is the only primary FAB.
 - Timed hold is the primary favourite interaction and may remain hidden. Its three stages must use one shared, visibly distinct candy-red tier palette across pulse, card, Place library, and map star; interaction green is reserved for action emphasis. A newly saved place immediately links unambiguous matching historical tracks, while bulk migration and BLE/sync semantics still require separate approval.
 - Checklist has no ordinals or visible sort buttons; hold reorder stays within group and persists.
-- New external UI/docs, APK/firmware artifacts and releases, and BLE advertising use `BugChecking`. Legacy BLE recognition, database/protocol fields, classes, and `passport_*` internals remain until a separate compatibility migration.
+- New external UI/docs, APK/firmware artifacts and releases, and BLE advertising use `Been`. Legacy `BugChecking`/`AI Passport` BLE recognition, `com.bugchecking.app`, database/protocol fields, classes, and `passport_*` internals remain until a separate compatibility migration.
 - Selecting a nearby place changes only the displayed name and preserves the real check-in coordinate.
 - Transparent root scaffolds explicitly use `onSurface`; dense form surfaces stay stable and opaque. Independent pages have no title or solid app bar: a four-corner action layer standardises Back, context, confirm/next, and destructive actions, and absent actions leave their corner empty. Precision stays beside coordinates rather than in a repeated status subtitle.
 - Fixed bottom Save/Add actions use transparent hosts with measured navigation/IME clearance; they do not add full-width tonal trays. System bars remain edge-to-edge and theme-adaptive.
 - Map attribution uses a readable semantic scrim and consumes safe-drawing insets. Renderer sources/layers own point/route geometry; ordinary points are circles and favourites are stars. UI-U2 is accepted, while native-clustering tokens remain deferred.
 - In the accepted UI-U4 shell, primary pages have no solid top bar or page title. The device entry is the highest-value status/action: its container stays neutral, disconnected uses a deep-green icon, and all other connection/sync states use a neon-green icon. Routine editor helpers, completion/QR card surfaces, profile, and backup controls stay neutral; journey and checklist progress use candy red.
-- BugChecking uses a semantic shape hierarchy: large shells derive from the Android screen radius, fields stay at 16 dp, ordinary text buttons stay at 24 dp, and explicit circles/full shapes keep their native meaning. Curved card content uses shared safety padding instead of legacy local insets. Palette colours may change at runtime, while shape, border, and component dimensions do not follow user colour customisation. Page code may not add raw colours, local rounded shapes, generic theme-shape bypasses, or numeric border widths; the Gradle token guard is a delivery gate. This BugChecking project rule became `accepted` with UI-U4 on 2026-11-04, but it still does not become a cross-project preference automatically.
+- Been uses a semantic shape hierarchy: large shells derive from the Android screen radius, fields stay at 16 dp, ordinary text buttons stay at 24 dp, and explicit circles/full shapes keep their native meaning. Curved card content uses shared safety padding instead of legacy local insets. Palette colours may change at runtime, while shape, border, and component dimensions do not follow user colour customisation. Page code may not add raw colours, local rounded shapes, generic theme-shape bypasses, or numeric border widths; the Gradle token guard is a delivery gate. This Been project rule became `accepted` with UI-U4 on 2026-11-04, but it still does not become a cross-project preference automatically.
 
 ## 5. Rework and reversals to learn from
 
@@ -163,7 +163,7 @@ Splitting a concatenated name on apparent hotel or garden-compound suffixes look
 
 ### 5.8 Brand rename versus compatibility
 
-External UI/docs, public build artifacts/releases, BLE advertising, protocol, database, and historical naming are separate layers. The first three use BugChecking; legacy recognition, protocol/database, and internal names remain only for compatibility.
+External UI/docs, public build artifacts/releases, BLE advertising, protocol, database, and historical naming are separate layers. The first three use Been; `BugChecking`, legacy recognition, protocol/database, and internal names remain only for compatibility.
 
 ### 5.9 Bottom action Surface versus system navigation
 
@@ -238,7 +238,7 @@ Promotion condition
 
 ## 8. Path to a personal development skill
 
-Accept BugChecking rules phase by phase; apply the same process—but not the same visual world—to Tianse beta; compare both projects; explicitly promote genuine cross-project preferences; then create a skill containing triggers, brief questions, selection tendencies, anti-patterns, layered approvals, device matrices, memory promotion, and examples. Replay it against both projects: it must not copy BugChecking's map/candy identity into Tianse beta or leak Tianse beta's identity back into BugChecking.
+Accept Been rules phase by phase; apply the same process—but not the same visual world—to Tianse beta; compare both projects; explicitly promote genuine cross-project preferences; then create a skill containing triggers, brief questions, selection tendencies, anti-patterns, layered approvals, device matrices, memory promotion, and examples. Replay it against both projects: it must not copy Been's map/candy identity into Tianse beta or leak Tianse beta's identity back into Been.
 
 ## 9. Candidate preferences awaiting Tianse beta
 

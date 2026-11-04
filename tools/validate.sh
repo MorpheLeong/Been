@@ -143,14 +143,14 @@ run_firmware_checks() (
         "${idf_command[@]}" -B "${validation_build_dir}" \
         -D "SDKCONFIG=${validation_build_dir}/sdkconfig" build
     "${idf_command[@]}" -B "${validation_build_dir}" merge-bin \
-        -o "${validation_build_dir}/BugChecking-full.bin"
+        -o "${validation_build_dir}/Been-full.bin"
     "${python_bin}" tools/verify_firmware.py "${validation_build_dir}"
     PYTHONDONTWRITEBYTECODE=1 "${python_bin}" tools/archive_firmware.py create \
         "${validation_build_dir}" --archive-root "${repo_root}/build/firmware"
     mkdir -p "${repo_root}/build"
     install -m 0644 \
-        "${validation_build_dir}/BugChecking-full.bin" \
-        "${repo_root}/build/BugChecking-full.bin"
+        "${validation_build_dir}/Been-full.bin" \
+        "${repo_root}/build/Been-full.bin"
     echo "Firmware build: PASS"
 )
 

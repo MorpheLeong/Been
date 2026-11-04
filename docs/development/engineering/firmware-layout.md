@@ -52,8 +52,8 @@ images must fit entirely inside a configured partition; an offset inside that
 partition is allowed. Merely declaring a resource partition does not require a
 preloaded image, but listing an image in `flash_args` makes it mandatory.
 
-Upload only `build/BugChecking-full.bin`; the similarly named app-only
-`build/BugChecking.bin` does not contain the bootloader or partition
+Upload only `build/Been-full.bin`; the similarly named app-only
+`build/Been.bin` does not contain the bootloader or partition
 table.
 
 ## Flashing and stored data

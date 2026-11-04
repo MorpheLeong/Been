@@ -35,11 +35,16 @@ import java.util.zip.ZipOutputStream
 
 private const val BACKUP_SCHEMA_VERSION = 3
 private const val BACKUP_MIME = "application/zip"
-private const val BACKUP_PREFIX = "BugChecking-"
+private const val BACKUP_PREFIX = "Been-"
+private const val LEGACY_BACKUP_PREFIX = "BugChecking-"
 private const val CHANGE_BACKUP_PREFIX = "${BACKUP_PREFIX}change-"
+private const val LEGACY_CHANGE_BACKUP_PREFIX = "${LEGACY_BACKUP_PREFIX}change-"
 private const val LATEST_BACKUP_NAME = "${BACKUP_PREFIX}latest.bugchecking.zip"
+private const val LEGACY_LATEST_BACKUP_NAME = "${LEGACY_BACKUP_PREFIX}latest.bugchecking.zip"
 private const val PREVIOUS_BACKUP_NAME = "${BACKUP_PREFIX}previous.bugchecking.zip"
+private const val LEGACY_PREVIOUS_BACKUP_NAME = "${LEGACY_BACKUP_PREFIX}previous.bugchecking.zip"
 private const val DAILY_BACKUP_PREFIX = "${BACKUP_PREFIX}daily-"
+private const val LEGACY_DAILY_BACKUP_PREFIX = "${LEGACY_BACKUP_PREFIX}daily-"
 private const val MILESTONE_BACKUP_PREFIX = "${BACKUP_PREFIX}milestone-"
 private const val PARTIAL_BACKUP_PREFIX = "${BACKUP_PREFIX}writing-"
 private const val MANIFEST_ENTRY = "backup.json"
@@ -334,7 +339,10 @@ object AppDataBackup {
                 }
                 when (kind) {
                     BackupKind.DAILY -> {
-                        runCatching { pruneBackups(context, folder, DAILY_BACKUP_PREFIX, DAILY_BACKUP_RETENTION) }
+                        runCatching {
+                            pruneBackups(context, folder, DAILY_BACKUP_PREFIX, DAILY_BACKUP_RETENTION)
+                            pruneBackups(context, folder, LEGACY_DAILY_BACKUP_PREFIX, DAILY_BACKUP_RETENTION)
+                        }
                         val latestPartial = writePartialArchive(context, folder, now, manifest, avatar, checksum)
                         rotateLatestBackup(context, folder, latestPartial)
                     }
@@ -491,15 +499,16 @@ object AppDataBackup {
     private fun rotateLatestBackup(context: Context, treeUri: Uri, partial: Uri) {
         val resolver = context.contentResolver
         val before = folderDocuments(context, treeUri)
-        val latest = before.filter { it.name == LATEST_BACKUP_NAME }
+        val latest = before.filter { it.name == LATEST_BACKUP_NAME || it.name == LEGACY_LATEST_BACKUP_NAME }
             .maxWithOrNull(compareBy<BackupFileRecord> { it.lastModified }.thenBy { it.id })
-        val previous = before.filter { it.name == PREVIOUS_BACKUP_NAME }
-            .maxWithOrNull(compareBy<BackupFileRecord> { it.lastModified }.thenBy { it.id })
+        val previous = before.filter {
+            it.name == PREVIOUS_BACKUP_NAME || it.name == LEGACY_PREVIOUS_BACKUP_NAME
+        }
 
         try {
             if (latest != null) {
-                if (previous != null) {
-                    require(DocumentsContract.deleteDocument(resolver, documentUri(treeUri, previous))) {
+                previous.forEach { existing ->
+                    require(DocumentsContract.deleteDocument(resolver, documentUri(treeUri, existing))) {
                         "无法轮换上一份备份"
                     }
                 }
@@ -522,7 +531,10 @@ object AppDataBackup {
         val afterLatest = folderDocuments(context, treeUri)
         val hasPrevious = afterLatest.any { it.name == PREVIOUS_BACKUP_NAME }
         val legacyChanges = afterLatest
-            .filter { it.name.startsWith(CHANGE_BACKUP_PREFIX) && it.name.endsWith(".bugchecking.zip") }
+            .filter {
+                (it.name.startsWith(CHANGE_BACKUP_PREFIX) || it.name.startsWith(LEGACY_CHANGE_BACKUP_PREFIX)) &&
+                    it.name.endsWith(".bugchecking.zip")
+            }
             .sortedWith(compareByDescending<BackupFileRecord> { it.lastModified }.thenByDescending { it.name })
         val previousReady = hasPrevious || legacyChanges.firstOrNull()?.let { legacy ->
             DocumentsContract.renameDocument(
@@ -533,7 +545,10 @@ object AppDataBackup {
         } == true
         if (previousReady) {
             folderDocuments(context, treeUri)
-                .filter { it.name.startsWith(CHANGE_BACKUP_PREFIX) && it.name.endsWith(".bugchecking.zip") }
+                .filter {
+                    (it.name.startsWith(CHANGE_BACKUP_PREFIX) || it.name.startsWith(LEGACY_CHANGE_BACKUP_PREFIX)) &&
+                        it.name.endsWith(".bugchecking.zip")
+                }
                 .forEach { legacy ->
                     runCatching { DocumentsContract.deleteDocument(resolver, documentUri(treeUri, legacy)) }
                 }

@@ -1334,7 +1334,7 @@ static void on_key(bsp_btn_t btn, bsp_btn_ev_t event, void *user)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "BugChecking location notebook boot");
+    ESP_LOGI(TAG, "Been location notebook boot");
     bsp_i2c_init();
     if (bsp_display_init() != ESP_OK || (s_lv_display = bsp_lvgl_init()) == NULL) {
         ESP_LOGE(TAG, "Display/LVGL initialization failed (MOSI=%d SCLK=%d CS=%d DC=%d BL=%d)",

@@ -54,7 +54,7 @@ class PrimaryPagesTest {
     }
 
     @Test fun generatedQrRoundTripsUnicodePayload() {
-        val payload = "BugChecking：栗Cafe（长宁馥邦苑店）"
+        val payload = "Been：栗Cafe（长宁馥邦苑店）"
         val matrix = QrCodeImage.encode(payload, 512)
         val pixels = IntArray(matrix.width * matrix.height) { index ->
             if (matrix[index % matrix.width, index / matrix.width]) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
@@ -412,17 +412,28 @@ class PrimaryPagesTest {
 
     @Test fun dailyRetentionNeverDeletesLayeredOrManualBackups() {
         val daily = (1..32).map { index ->
-            BackupFileRecord("daily-$index", "BugChecking-daily-$index.bugchecking.zip", index.toLong())
+            BackupFileRecord("daily-$index", "Been-daily-$index.bugchecking.zip", index.toLong())
         }
         val files = daily + listOf(
-            BackupFileRecord("latest", "BugChecking-latest.bugchecking.zip", 1),
-            BackupFileRecord("previous", "BugChecking-previous.bugchecking.zip", 1),
-            BackupFileRecord("manual", "BugChecking-manual-1.bugchecking.zip", 1),
-            BackupFileRecord("milestone", "BugChecking-milestone-before-restore-1.bugchecking.zip", 1),
+            BackupFileRecord("latest", "Been-latest.bugchecking.zip", 1),
+            BackupFileRecord("previous", "Been-previous.bugchecking.zip", 1),
+            BackupFileRecord("manual", "Been-manual-1.bugchecking.zip", 1),
+            BackupFileRecord("milestone", "Been-milestone-before-restore-1.bugchecking.zip", 1),
         )
         assertEquals(
             listOf("daily-2", "daily-1"),
-            backupsToPrune(files, "BugChecking-daily-", 30).map { it.id },
+            backupsToPrune(files, "Been-daily-", 30).map { it.id },
+        )
+    }
+
+    @Test fun legacyBugCheckingDailyBackupsRemainPrunableAfterRename() {
+        val daily = (1..32).map { index ->
+            BackupFileRecord("legacy-daily-$index", "BugChecking-daily-$index.bugchecking.zip", index.toLong())
+        }
+
+        assertEquals(
+            listOf("legacy-daily-2", "legacy-daily-1"),
+            backupsToPrune(daily, "BugChecking-daily-", 30).map { it.id },
         )
     }
 

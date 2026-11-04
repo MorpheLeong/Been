@@ -51,6 +51,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bugchecking-firmware-${{ github.run_id }}
-          path: build/BugChecking-full.bin
+          path: build/Been-full.bin
           if-no-files-found: error
           retention-days: 7
