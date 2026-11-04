@@ -84,6 +84,21 @@ class PassportDesignTokenTest {
     }
 
     @Test
+    fun `pager offset maps continuously to compact navigation position`() {
+        assertEquals(0f, primaryNavigationPosition(0, 0f))
+        assertEquals(0.4f, primaryNavigationPosition(0, 0.4f))
+        assertEquals(0.6f, primaryNavigationPosition(1, -0.4f))
+        assertEquals(2f, primaryNavigationPosition(2, 0.4f))
+    }
+
+    @Test
+    fun `navigation label emphasis crossfades between adjacent items`() {
+        assertEquals(0.25f, primaryNavigationSelectionFraction(0.75f, 0))
+        assertEquals(0.75f, primaryNavigationSelectionFraction(0.75f, 1))
+        assertEquals(0f, primaryNavigationSelectionFraction(0.75f, 2))
+    }
+
+    @Test
     fun `floating navigation uses bounded concentric radius`() {
         assertEquals(16.dp, concentricCornerRadius(0.dp, 16.dp, 64.dp))
         assertEquals(16.dp, concentricCornerRadius(24.dp, 16.dp, 64.dp))

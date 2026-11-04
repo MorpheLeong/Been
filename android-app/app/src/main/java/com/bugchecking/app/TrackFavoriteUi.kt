@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -70,6 +68,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
@@ -187,7 +186,7 @@ internal fun FavoriteTrackCard(
     val activePulseColor = trackFavoritePulseColor(pulseTier)
     val favoriteAccentColor = trackFavoriteAccentColor(displayedTier)
     val contentColor = trackFavoriteContentColor(displayedTier)
-    val starDescription = trackFavoriteList(track.favoriteTier)?.let { "${it.stars} ${it.name}" } ?: "未收藏"
+    val favoriteDescription = trackFavoriteList(track.favoriteTier)?.name ?: "未收藏"
     val actions = buildList {
         trackFavoriteLists.forEach { list ->
             add(CustomAccessibilityAction("收藏到${list.name}") { onFavorite(list.tier) })
@@ -202,7 +201,7 @@ internal fun FavoriteTrackCard(
         modifier = modifier
             .border(PassportTokens.borders.focused, focusOutlineColor, PassportTokens.shapes.cardShape)
             .semantics {
-                stateDescription = starDescription
+                stateDescription = favoriteDescription
                 customActions = actions
             }
             .combinedClickable(
@@ -238,30 +237,7 @@ internal fun FavoriteTrackCard(
                 .onSizeChanged { cardSize = it },
         ) {
             content(contentColor, displayedTier)
-            FavoriteTierStars(
-                tier = displayedTier,
-                color = favoriteAccentColor,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = PassportTokens.content.cardHorizontalPadding,
-                        bottom = PassportTokens.content.compactCardVerticalPadding,
-                    ),
-            )
         }
-    }
-}
-
-@Composable
-internal fun FavoriteTierStars(tier: Int, color: Color, modifier: Modifier = Modifier) {
-    if (tier !in 1..3) return
-    Row(
-        modifier = modifier.semantics {
-            contentDescription = trackFavoriteList(tier)?.let { "${it.stars} ${it.name}" }.orEmpty()
-        },
-        horizontalArrangement = Arrangement.spacedBy(1.dp),
-    ) {
-        repeat(tier) { Icon(Icons.Default.Star, null, tint = color, modifier = Modifier.size(16.dp)) }
     }
 }
 
@@ -278,12 +254,12 @@ internal fun FavoriteTierDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(PassportSpacing.xxs)) {
                 trackFavoriteLists.forEach { list ->
-                    FavoriteTierChoice(list.name, list.tier, selectedTier == list.tier) {
+                    FavoriteTierChoice(list.name, selectedTier == list.tier) {
                         selectedTier = list.tier
                     }
                 }
                 if (currentTier > 0) {
-                    FavoriteTierChoice("取消收藏", 0, selectedTier == 0) { selectedTier = 0 }
+                    FavoriteTierChoice("取消收藏", selectedTier == 0) { selectedTier = 0 }
                 }
             }
         },
@@ -297,7 +273,7 @@ internal fun FavoriteTierDialog(
 }
 
 @Composable
-private fun FavoriteTierChoice(name: String, tier: Int, selected: Boolean, onClick: () -> Unit) {
+private fun FavoriteTierChoice(name: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = PassportSpacing.minTouchTarget)
             .clickable(onClick = onClick),
@@ -305,7 +281,6 @@ private fun FavoriteTierChoice(name: String, tier: Int, selected: Boolean, onCli
     ) {
         RadioButton(selected, onClick)
         Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        FavoriteTierStars(tier = tier, color = trackFavoriteAccentColor(tier))
     }
 }
 
@@ -349,7 +324,7 @@ internal fun PlaceLibraryScreen(
                         FilterChip(
                             selected = filterMask and bit != 0,
                             onClick = { filterMask = filterMask xor bit },
-                            label = { Text("${list.stars} ${list.name}") },
+                            label = { Text(list.name) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = trackFavoriteContainerColor(list.tier),
                                 selectedLabelColor = trackFavoriteContentColor(list.tier),
@@ -372,7 +347,7 @@ internal fun PlaceLibraryScreen(
                             contentColor = trackFavoriteContentColor(place.favoriteTier),
                         ),
                         modifier = Modifier.fillMaxWidth().semantics {
-                            contentDescription = "${place.name}，${list?.stars.orEmpty()}${list?.name.orEmpty()}，到访 ${place.visitCount} 次"
+                            contentDescription = "${place.name}，${list?.name.orEmpty()}，到访 ${place.visitCount} 次"
                         },
                     ) {
                         Column(
@@ -381,22 +356,12 @@ internal fun PlaceLibraryScreen(
                                 vertical = PassportTokens.content.compactCardVerticalPadding,
                             ),
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    place.name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                FavoriteTierStars(
-                                    tier = place.favoriteTier,
-                                    color = trackFavoriteAccentColor(place.favoriteTier),
-                                    modifier = Modifier.padding(start = PassportSpacing.sm),
-                                )
-                            }
+                            Text(
+                                place.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                             Text(
                                 buildString {
                                     append("到访 ${place.visitCount} 次")
@@ -567,7 +532,7 @@ internal fun PlaceDetailScreen(
         AlertDialog(
             onDismissRequest = { pendingUnlink = null },
             title = { Text("解除场所关联？") },
-            text = { Text("“${track.name}”会保留为独立轨迹，但不再显示这个场所的收藏星标。") },
+            text = { Text("“${track.name}”会保留为独立轨迹，但不再显示这个场所的收藏状态。") },
             confirmButton = {
                 TextButton(
                     onClick = { onUnlinkTrack(track); pendingUnlink = null },

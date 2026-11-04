@@ -84,8 +84,11 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -180,6 +183,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
@@ -377,6 +381,15 @@ internal enum class Tab(val route: String, val label: String, val icon: ImageVec
 
 internal val primaryNavigationTabs = listOf(Tab.Tracks, Tab.Checklist, Tab.Qr)
 
+internal fun primaryNavigationPosition(
+    currentPage: Int,
+    currentPageOffsetFraction: Float,
+    pageCount: Int = primaryNavigationTabs.size,
+): Float = (currentPage + currentPageOffsetFraction).coerceIn(0f, (pageCount - 1).coerceAtLeast(0).toFloat())
+
+internal fun primaryNavigationSelectionFraction(position: Float, itemIndex: Int): Float =
+    (1f - kotlin.math.abs(position - itemIndex)).coerceIn(0f, 1f)
+
 private object Routes {
     const val TrackMap = "track-map"
     const val TrackFavorites = "track-favorites"
@@ -458,6 +471,8 @@ private fun PassportApp(
     var statusOverlayMessage by remember { mutableStateOf<String?>(null) }
     var deviceStatusInitialized by remember { mutableStateOf(false) }
     val navController = rememberNavController()
+    val appScope = rememberCoroutineScope()
+    val primaryPagerState = rememberPagerState(pageCount = { primaryNavigationTabs.size })
     val destinations = remember(revision, externalRevision) { db.destinations() }
     val qrs = remember(revision, externalRevision) { db.qrs() }
     val tracks = remember(revision, externalRevision) { db.tracks() }
@@ -514,6 +529,20 @@ private fun PassportApp(
     }
     fun openTab(tab: Tab) {
         if (tab != Tab.Tracks) trackFocusTarget = null
+        if (compact && tab in primaryNavigationTabs) {
+            navController.navigate(Tab.Tracks.route) {
+                popUpTo(Tab.Tracks.route) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+            appScope.launch {
+                primaryPagerState.animateScrollToPage(
+                    page = primaryNavigationTabs.indexOf(tab),
+                    animationSpec = tween(durationMillis = 300, easing = DetailEnterEasing),
+                )
+            }
+            return
+        }
         navController.navigate(tab.route) {
             popUpTo(Tab.Tracks.route) { saveState = true }
             launchSingleTop = true
@@ -542,36 +571,111 @@ private fun PassportApp(
             },
         ) {
         composable(route = Tab.Tracks.route) {
-            PassportRootScaffold(
-                Tab.Tracks,
-                compact,
-                deviceActionState,
-                statusOverlayMessage,
-                ::openTab,
-                if (bleConnected) sync else connect,
-                profileAvatarPath = profile.avatarPath,
-                onOpenProfile = ::openProfile,
-                onOpenMap = { navController.navigate(Routes.TrackMap) },
-                onOpenFavorites = { navController.navigate(Routes.TrackFavorites) },
-                onAdd = { navController.navigate(Routes.TrackCreate) },
-                addContentDescription = "手动添加轨迹",
-            ) { topContentPadding ->
-                TracksPage(
-                    rows = remember(tracks, trackFocusTarget) {
-                        val target = trackFocusTarget
-                        if (target == null || tracks.any { it.id == target.id }) tracks
-                        else (tracks + target).sortedByDescending(TrackPoint::time)
-                    },
-                    focusTrackId = trackFocusTarget?.id,
-                    topContentPadding = topContentPadding,
-                    edit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
-                    favorite = { track, tier ->
-                        runCatching { db.setTrackFavoriteTier(track.id, tier) }
-                            .onSuccess { if (it) refresh() }
-                            .onFailure { Toast.makeText(context, "收藏更新失败", Toast.LENGTH_SHORT).show() }
-                            .getOrDefault(false)
-                    },
+            if (compact) {
+                val settledTab = primaryNavigationTabs[primaryPagerState.settledPage]
+                val navigationPosition = primaryNavigationPosition(
+                    currentPage = primaryPagerState.currentPage,
+                    currentPageOffsetFraction = primaryPagerState.currentPageOffsetFraction,
                 )
+                LaunchedEffect(primaryPagerState.settledPage) {
+                    if (settledTab != Tab.Tracks) trackFocusTarget = null
+                }
+                PassportRootScaffold(
+                    tab = settledTab,
+                    compact = true,
+                    deviceActionState = deviceActionState,
+                    statusOverlayMessage = statusOverlayMessage,
+                    onTabSelected = ::openTab,
+                    onDeviceAction = if (bleConnected) sync else connect,
+                    profileAvatarPath = profile.avatarPath,
+                    onOpenProfile = ::openProfile,
+                    onOpenMap = if (settledTab == Tab.Tracks) {
+                        { navController.navigate(Routes.TrackMap) }
+                    } else null,
+                    onOpenFavorites = if (settledTab == Tab.Tracks) {
+                        { navController.navigate(Routes.TrackFavorites) }
+                    } else null,
+                    onAdd = when (settledTab) {
+                        Tab.Tracks -> { { navController.navigate(Routes.TrackCreate) } }
+                        Tab.Checklist -> { { navController.navigate(Routes.ChecklistImport) } }
+                        Tab.Qr -> { { navController.navigate("${Routes.QrEdit}/new") } }
+                        Tab.Me -> null
+                    },
+                    addContentDescription = when (settledTab) {
+                        Tab.Tracks -> "手动添加轨迹"
+                        Tab.Checklist -> "添加到清单"
+                        Tab.Qr -> "添加二维码"
+                        Tab.Me -> "添加"
+                    },
+                    navigationPosition = navigationPosition,
+                ) { topContentPadding ->
+                    HorizontalPager(
+                        state = primaryPagerState,
+                        key = { page -> primaryNavigationTabs[page].route },
+                        beyondViewportPageCount = 1,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { page ->
+                        Box(Modifier.fillMaxSize().clipToBounds()) {
+                            when (primaryNavigationTabs[page]) {
+                            Tab.Tracks -> TracksPage(
+                                rows = remember(tracks, trackFocusTarget) {
+                                    val target = trackFocusTarget
+                                    if (target == null || tracks.any { it.id == target.id }) tracks
+                                    else (tracks + target).sortedByDescending(TrackPoint::time)
+                                },
+                                focusTrackId = trackFocusTarget?.id,
+                                topContentPadding = topContentPadding,
+                                edit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
+                                favorite = { track, tier ->
+                                    runCatching { db.setTrackFavoriteTier(track.id, tier) }
+                                        .onSuccess { if (it) refresh() }
+                                        .onFailure { Toast.makeText(context, "收藏更新失败", Toast.LENGTH_SHORT).show() }
+                                        .getOrDefault(false)
+                                },
+                            )
+                            Tab.Checklist -> ChecklistPage(db, destinations, refresh, topContentPadding)
+                            Tab.Qr -> QrPage(
+                                db = db,
+                                qrs = qrs,
+                                destinations = destinations,
+                                topContentPadding = topContentPadding,
+                                refresh = refresh,
+                                edit = { qr -> navController.navigate("${Routes.QrEdit}/${qr.id}") },
+                                present = { qr -> navController.navigate("${Routes.QrPresent}/${qr.id}") },
+                            )
+                            Tab.Me -> Unit
+                            }
+                        }
+                    }
+                }
+            } else {
+                PassportRootScaffold(
+                    Tab.Tracks,
+                    compact,
+                    deviceActionState,
+                    statusOverlayMessage,
+                    ::openTab,
+                    if (bleConnected) sync else connect,
+                    profileAvatarPath = profile.avatarPath,
+                    onOpenProfile = ::openProfile,
+                    onOpenMap = { navController.navigate(Routes.TrackMap) },
+                    onOpenFavorites = { navController.navigate(Routes.TrackFavorites) },
+                    onAdd = { navController.navigate(Routes.TrackCreate) },
+                    addContentDescription = "手动添加轨迹",
+                ) { topContentPadding ->
+                    TracksPage(
+                        rows = tracks,
+                        focusTrackId = trackFocusTarget?.id,
+                        topContentPadding = topContentPadding,
+                        edit = { navController.navigate("${Routes.TrackEdit}/${it.id}") },
+                        favorite = { track, tier ->
+                            runCatching { db.setTrackFavoriteTier(track.id, tier) }
+                                .onSuccess { if (it) refresh() }
+                                .onFailure { Toast.makeText(context, "收藏更新失败", Toast.LENGTH_SHORT).show() }
+                                .getOrDefault(false)
+                        },
+                    )
+                }
             }
         }
         composable(route = Tab.Checklist.route) {
@@ -892,6 +996,7 @@ private fun PassportRootScaffold(
     onOpenFavorites: (() -> Unit)? = null,
     onAdd: (() -> Unit)? = null,
     addContentDescription: String = "添加",
+    navigationPosition: Float? = null,
     content: @Composable (topContentPadding: Dp) -> Unit,
 ) {
     Box(Modifier.fillMaxSize().clearFocusOnTapOutside()) {
@@ -967,17 +1072,39 @@ private fun PassportRootScaffold(
                             shadowElevation = designTokens.components.floatingNavigationShadowElevation,
                             border = floatingControlBorder(),
                         ) {
-                            Row(
+                            BoxWithConstraints(
                                 Modifier.fillMaxSize().padding(designTokens.components.compactNavigationContentPadding),
-                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                primaryNavigationTabs.forEach { item ->
-                                    PassportCompactNavigationItem(
-                                        item = item,
-                                        modifier = Modifier.weight(1f),
-                                        selected = tab == item,
-                                        onClick = { onTabSelected(item) },
-                                    )
+                                val itemWidth = maxWidth / primaryNavigationTabs.size
+                                val resolvedPosition = (navigationPosition
+                                    ?: primaryNavigationTabs.indexOf(tab).coerceAtLeast(0).toFloat())
+                                    .coerceIn(0f, primaryNavigationTabs.lastIndex.toFloat())
+                                Box(
+                                    Modifier.align(Alignment.CenterStart)
+                                        .offset(x = itemWidth * resolvedPosition)
+                                        .width(itemWidth)
+                                        .height(designTokens.components.compactNavigationItemHeight)
+                                        .background(
+                                            MaterialTheme.colorScheme.primary,
+                                            designTokens.shapes.navigationSelectionShape,
+                                        ),
+                                )
+                                Row(
+                                    Modifier.fillMaxSize(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    primaryNavigationTabs.forEachIndexed { index, item ->
+                                        PassportCompactNavigationItem(
+                                            item = item,
+                                            modifier = Modifier.weight(1f),
+                                            selected = tab == item,
+                                            selectionFraction = primaryNavigationSelectionFraction(
+                                                resolvedPosition,
+                                                index,
+                                            ),
+                                            onClick = { onTabSelected(item) },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1006,6 +1133,7 @@ private fun PassportRootScaffold(
 private fun PassportCompactNavigationItem(
     item: Tab,
     selected: Boolean,
+    selectionFraction: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1013,8 +1141,12 @@ private fun PassportCompactNavigationItem(
     Surface(
         modifier = modifier.height(tokens.components.compactNavigationItemHeight),
         shape = tokens.shapes.navigationSelectionShape,
-        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = Color.Transparent,
+        contentColor = lerp(
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            MaterialTheme.colorScheme.onPrimary,
+            selectionFraction,
+        ),
     ) {
         Column(
             Modifier.fillMaxSize()

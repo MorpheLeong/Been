@@ -3,15 +3,14 @@ package com.bugchecking.app
 data class TrackFavoriteList(
     val tier: Int,
     val name: String,
-    val stars: String,
 ) {
     init { require(tier in 1..3) }
 }
 
 val trackFavoriteLists = listOf(
-    TrackFavoriteList(1, "我的遗产", "★"),
-    TrackFavoriteList(2, "不错食堂", "★★"),
-    TrackFavoriteList(3, "余味绕梁", "★★★"),
+    TrackFavoriteList(1, "我的遗产"),
+    TrackFavoriteList(2, "不错食堂"),
+    TrackFavoriteList(3, "余味绕梁"),
 )
 
 fun trackFavoriteList(tier: Int): TrackFavoriteList? = trackFavoriteLists.firstOrNull { it.tier == tier }
