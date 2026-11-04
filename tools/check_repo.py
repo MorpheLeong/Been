@@ -32,7 +32,7 @@ ROOT_MARKDOWN_ALLOWLIST = {
     "CLAUDE.md",
     "CLAUDE.zh_CN.md",
     "README.md",
-    "README.zh_CN.md",
+    "README.en.md",
 }
 # Register only concrete, vendored component directories, e.g. "components/foo".
 # These exemptions never change the input to sensitive-content/conflict checks.
@@ -207,7 +207,7 @@ def check_community_document_links(files: list[Path], errors: list[str]) -> None
 def check_document_languages(
     files: list[Path], errors: list[str], vendored_roots: tuple[Path, ...] = ()
 ) -> None:
-    """Require an English default and a linked Simplified Chinese peer."""
+    """Require paired languages, with Simplified Chinese as the root README default."""
     markdown = {
         path for path in files
         if path.suffix.lower() == ".md" and not is_vendored_document(path, vendored_roots)
@@ -217,6 +217,29 @@ def check_document_languages(
         name = path.name
         text = path.read_text(encoding="utf-8")
         opening = "\n".join(text.splitlines()[:8])
+
+        if path == ROOT / "README.md":
+            english_path = ROOT / "README.en.md"
+            if english_path not in markdown:
+                errors.append("README.md: missing English peer README.en.md")
+            elif "README.en.md" not in opening:
+                errors.append("README.md: missing top language link to README.en.md")
+            continue
+
+        if path == ROOT / "README.en.md":
+            chinese_path = ROOT / "README.md"
+            if chinese_path not in markdown:
+                errors.append("README.en.md: missing Simplified Chinese default README.md")
+            elif "README.md" not in opening:
+                errors.append("README.en.md: missing top language link to README.md")
+            english_prose = text.replace("简体中文", "")
+            match = CJK_RE.search(english_prose)
+            if match:
+                line = english_prose.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"README.en.md:{line}: English README must use English prose"
+                )
+            continue
 
         if name.endswith(".zh_CN.md"):
             default_name = f"{name[:-len('.zh_CN.md')]}.md"

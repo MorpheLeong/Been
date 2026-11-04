@@ -100,6 +100,22 @@ class VendoredDocumentationTest(unittest.TestCase):
         ]
         self.assertEqual(self.document_errors(files), [])
 
+    def test_root_readme_uses_simplified_chinese_default(self) -> None:
+        files = [
+            self.document("README.md", "[English](README.en.md)\n# 项目\n"),
+            self.document("README.en.md", "[简体中文](README.md)\n# Project\n"),
+        ]
+        self.assertEqual(self.document_errors(files), [])
+
+    def test_root_readme_requires_english_peer_and_english_prose(self) -> None:
+        chinese = self.document("README.md", "# 项目\n")
+        errors = self.document_errors([chinese])
+        self.assertTrue(any("missing English peer" in error for error in errors))
+
+        english = self.document("README.en.md", "[简体中文](README.md)\n# 中文正文\n")
+        errors = self.document_errors([chinese, english])
+        self.assertTrue(any("English README must use English prose" in error for error in errors))
+
     def test_invalid_root_registrations_fail_closed(self) -> None:
         file_path = self.document("components/vendor_audio/README.md")
         for name in (

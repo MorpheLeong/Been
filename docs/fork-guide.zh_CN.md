@@ -53,6 +53,8 @@ fork 后，`main` 分支**只允许增加/修改根目录的 `README.md` 和 `do
 
 > **GitHub 显示行为**：GitHub 显示优先级为根目录 `README.md` > `docs/README.md`，因此 fork 用户在根目录自建 `README.md` 后即覆盖 `docs/README.md` 的显示——正契合上面"根目录 README 预留给开发者"的设计意图。
 
+所有 fork 文档仍遵循仓库的双语规则；fork 自有的根产品概览是例外：`README.md` 使用简体中文，`README.en.md` 使用英文，并保留互相切换链接。
+
 ## docs/assets 使用约定
 
 个人项目可能 `README.md` 不足以完整说明项目，`docs/assets/` 正是用于在 fork 下保存 README 的**补充文档与素材**（架构说明、产品设计、图片素材等）。`docs/assets/` 在**上游 main 上必须为空**（仅保留 `.gitkeep` 占位），因此 fork 用户应在该目录下自行创建 `readme.md` 说明使用方式。建议 `docs/assets/readme.md` 包含：
